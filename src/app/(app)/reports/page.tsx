@@ -4,28 +4,28 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CalendarIcon, FileText, LineChart, Download, Loader2, AlertTriangle } from "lucide-react";
-import { format, subMonths, startOfQuarter, endOfQuarter, startOfMonth, endOfMonth, subQuarters } from "date-fns";
+import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp } from "lucide-react";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, serverTimestamp } from 'firebase/firestore';
-import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore, FinancialTrendsOutput, QuarterlyReportOutput } from '@/types';
-import { generateFinancialReport, identifyFinancialTrends } from '@/ai/flows';
+import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, serverTimestamp, where } from 'firebase/firestore';
+import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore } from '@/types';
 import { useToast } from "@/hooks/use-toast";
+import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
-// Firestore Converters
+type ReportType = "income" | "expenses" | "tithes" | "summary";
+type PeriodType = "all" | "monthly";
+
+// We keep the converters here to ensure the useCollectionData hooks work as expected for data display/preview
 const incomeConverter = {
-  toFirestore(record: IncomeRecord): DocumentData {
-    const { id, date, createdAt, recordedByUserId, ...rest } = record;
-    const data: any = { ...rest, date: Timestamp.fromDate(date) };
-    if (recordedByUserId) data.recordedByUserId = recordedByUserId;
-    data.createdAt = createdAt ? Timestamp.fromDate(createdAt) : serverTimestamp();
-    return data;
-  },
+  toFirestore(record: IncomeRecord): DocumentData { return record as DocumentData; },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): IncomeRecord {
     const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
     return {
@@ -40,227 +40,125 @@ const incomeConverter = {
     };
   }
 };
-
 const titheConverter = {
-  toFirestore(record: TitheRecord): DocumentData {
-    const { id, date, createdAt, recordedByUserId, ...rest } = record;
-    const data: any = { ...rest, date: Timestamp.fromDate(date) };
-    if (recordedByUserId) data.recordedByUserId = recordedByUserId;
-    data.createdAt = createdAt ? Timestamp.fromDate(createdAt) : serverTimestamp();
-    return data;
-  },
+  toFirestore(record: TitheRecord): DocumentData { return record as DocumentData; },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): TitheRecord {
     const data = snapshot.data(options) as Omit<TitheRecordFirestore, 'id'>;
     return {
-      id: snapshot.id,
-      memberName: data.memberName,
+      id: snapshot.id, memberName: data.memberName,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      amount: data.amount,
-      recordedByUserId: data.recordedByUserId,
+      amount: data.amount, recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
     };
   }
 };
-
 const expenseConverter = {
-  toFirestore(record: ExpenseRecord): DocumentData {
-    const { id, date, createdAt, recordedByUserId, ...rest } = record;
-    const data: any = { ...rest, date: Timestamp.fromDate(date) };
-    if (recordedByUserId) data.recordedByUserId = recordedByUserId;
-    data.createdAt = createdAt ? Timestamp.fromDate(createdAt) : serverTimestamp();
-    return data;
-  },
+  toFirestore(record: ExpenseRecord): DocumentData { return record as DocumentData; },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): ExpenseRecord {
     const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      category: data.category,
-      amount: data.amount,
-      description: data.description,
-      payee: data.payee,
-      paymentMethod: data.paymentMethod,
-      recordedByUserId: data.recordedByUserId,
+      category: data.category, amount: data.amount, description: data.description,
+      payee: data.payee, paymentMethod: data.paymentMethod, recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
     };
   }
 };
 
+
 export default function ReportsPage() {
   const { toast } = useToast();
   const [authUser, authLoading, authError] = useAuthState(auth);
 
-  const incomeCollectionRef = authUser ? collection(db, 'income_records') : null;
-  const incomeQuery = incomeCollectionRef ? query(incomeCollectionRef, orderBy('date', 'desc')).withConverter<IncomeRecord>(incomeConverter) : null;
-  const [incomeRecords, isLoadingIncome, errorIncome] = useCollectionData(incomeQuery);
-
-  const tithesCollectionRef = authUser ? collection(db, 'tithe_records') : null;
-  const tithesQuery = tithesCollectionRef ? query(tithesCollectionRef, orderBy('date', 'desc')).withConverter<TitheRecord>(titheConverter) : null;
-  const [titheRecords, isLoadingTithes, errorTithes] = useCollectionData(tithesQuery);
-
-  const expensesCollectionRef = authUser ? collection(db, 'expense_records') : null;
-  const expensesQuery = expensesCollectionRef ? query(expensesCollectionRef, orderBy('date', 'desc')).withConverter<ExpenseRecord>(expenseConverter) : null;
-  const [expenseRecords, isLoadingExpenses, errorExpenses] = useCollectionData(expensesQuery);
-
-  const [startDateQuarterly, setStartDateQuarterly] = useState<Date | undefined>(startOfQuarter(subQuarters(new Date(), 1)));
-  const [endDateQuarterly, setEndDateQuarterly] = useState<Date | undefined>(endOfQuarter(subQuarters(new Date(), 1)));
-  const [quarterlyReport, setQuarterlyReport] = useState<QuarterlyReportOutput | null>(null);
-  const [isGeneratingQuarterlyReport, setIsGeneratingQuarterlyReport] = useState(false);
-
-  const [startDateTrends, setStartDateTrends] = useState<Date | undefined>(startOfMonth(subMonths(new Date(), 12)));
-  const [endDateTrends, setEndDateTrends] = useState<Date | undefined>(endOfMonth(subMonths(new Date(), 0))); // Trends up to end of current month
-  const [financialTrends, setFinancialTrends] = useState<FinancialTrendsOutput | null>(null);
-  const [isIdentifyingTrends, setIsIdentifyingTrends] = useState(false);
-  
+  const [reportType, setReportType] = useState<ReportType>("summary");
+  const [periodType, setPeriodType] = useState<PeriodType>("monthly");
+  const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedData, setGeneratedData] = useState<any[] | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  const dataIsLoading = isLoadingIncome || isLoadingTithes || isLoadingExpenses;
-  const dataError = errorIncome || errorTithes || errorExpenses;
+  // Note: These hooks are now primarily for context/awareness, not direct report generation.
+  const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
+  const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
+  const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
 
-  useEffect(() => {
-    setQuarterlyReport(null);
-  }, [startDateQuarterly, endDateQuarterly]);
-
-  useEffect(() => {
-    setFinancialTrends(null);
-  }, [startDateTrends, endDateTrends]);
-
-  const processedQuarterlyData = useMemo(() => {
-    if (dataIsLoading || !incomeRecords || !titheRecords || !expenseRecords || !startDateQuarterly || !endDateQuarterly) return null;
-    const filteredIncome = incomeRecords.filter(r => r.date >= startDateQuarterly && r.date <= endDateQuarterly);
-    const filteredTithes = titheRecords.filter(r => r.date >= startDateQuarterly && r.date <= endDateQuarterly);
-    const filteredExpenses = expenseRecords.filter(r => r.date >= startDateQuarterly && r.date <= endDateQuarterly);
-    return JSON.stringify({
-      period: `From ${format(startDateQuarterly, "yyyy-MM-dd")} to ${format(endDateQuarterly, "yyyy-MM-dd")}`,
-      income: filteredIncome.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-      tithes: filteredTithes.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-      expenses: filteredExpenses.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-    }, null, 2);
-  }, [incomeRecords, titheRecords, expenseRecords, startDateQuarterly, endDateQuarterly, dataIsLoading, format, startOfQuarter, endOfQuarter]);
-
-  const processedTrendData = useMemo(() => {
-    if (dataIsLoading || !incomeRecords || !titheRecords || !expenseRecords || !startDateTrends || !endDateTrends) return null;
-    const filteredIncome = incomeRecords.filter(r => r.date >= startDateTrends && r.date <= endDateTrends);
-    const filteredTithes = titheRecords.filter(r => r.date >= startDateTrends && r.date <= endDateTrends);
-    const filteredExpenses = expenseRecords.filter(r => r.date >= startDateTrends && r.date <= endDateTrends);
-    return JSON.stringify({
-      period: `From ${format(startDateTrends, "yyyy-MM-dd")} to ${format(endDateTrends, "yyyy-MM-dd")}`,
-      income: filteredIncome.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-      tithes: filteredTithes.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-      expenses: filteredExpenses.map(r => ({ ...r, date: format(r.date, "yyyy-MM-dd") })),
-    }, null, 2);
-  }, [incomeRecords, titheRecords, expenseRecords, startDateTrends, endDateTrends, dataIsLoading, format, startOfMonth, endOfMonth]);
-
-  const isProcessedQuarterlyDataEffectivelyEmpty = useMemo(() => {
-      if (dataIsLoading || !processedQuarterlyData) return true; 
-      try {
-          const data = JSON.parse(processedQuarterlyData);
-          return data.income.length === 0 && data.tithes.length === 0 && data.expenses.length === 0;
-      } catch { return true; }
-  }, [processedQuarterlyData, dataIsLoading]);
-
-  const isProcessedTrendDataEffectivelyEmpty = useMemo(() => {
-      if (dataIsLoading || !processedTrendData) return true;
-      try {
-          const data = JSON.parse(processedTrendData);
-          return data.income.length === 0 && data.tithes.length === 0 && data.expenses.length === 0;
-      } catch { return true; }
-  }, [processedTrendData, dataIsLoading]);
-
-
-  const handleGenerateReport = async () => {
-    if (!processedQuarterlyData || isProcessedQuarterlyDataEffectivelyEmpty) {
-      toast({ variant: "default", title: "No Data", description: "No data available for the selected period to generate a quarterly report." });
-      return;
-    }
-    setIsGeneratingQuarterlyReport(true);
+  const generateReport = async (format: 'pdf' | 'csv') => {
+    setIsGenerating(true);
     setGenerationError(null);
-    setQuarterlyReport(null);
+    setGeneratedData(null);
+    
+    const startDate = periodType === 'monthly' ? startOfMonth(selectedMonth) : undefined;
+    const endDate = periodType === 'monthly' ? endOfMonth(selectedMonth) : undefined;
+
     try {
-      const result = await generateFinancialReport({ financialData: processedQuarterlyData });
-      setQuarterlyReport(result);
-      if (!result.reportSummary || result.reportSummary.trim() === "") {
-        toast({ variant: "default", title: "Report Generated (Empty)", description: "The AI generated a report, but it's empty. This might be due to no financial activity in the selected period." });
-      } else {
-        toast({ title: "Success", description: "Quarterly summary report generated." });
+      // This is a placeholder for a server-side function we would build
+      // For now, we will filter data on the client side for simplicity.
+      // In a real app, this should be an API call to a serverless function.
+      let data: any[] = [];
+      let reportTitle = "";
+      const periodString = periodType === 'monthly' ? `for ${format(selectedMonth, "MMMM yyyy")}` : 'for All Time';
+
+      switch (reportType) {
+        case 'income':
+          reportTitle = `Income Report ${periodString}`;
+          data = (incomeRecords || []).filter(r => 
+            !startDate || (r.date >= startDate && r.date <= endDate!)
+          );
+          break;
+        case 'expenses':
+          reportTitle = `Expense Report ${periodString}`;
+          data = (expenseRecords || []).filter(r => 
+            !startDate || (r.date >= startDate && r.date <= endDate!)
+          );
+          break;
+        case 'tithes':
+          reportTitle = `Tithe Report ${periodString}`;
+          data = (titheRecords || []).filter(r => 
+            !startDate || (r.date >= startDate && r.date <= endDate!)
+          );
+          break;
+        case 'summary':
+           reportTitle = `Financial Summary ${periodString}`;
+           const filteredIncome = (incomeRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
+           const filteredTithes = (titheRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
+           const filteredExpenses = (expenseRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
+           const totalIncome = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
+           const totalTithes = filteredTithes.reduce((sum, r) => sum + r.amount, 0);
+           const totalExpenses = filteredExpenses.reduce((sum, r) => sum + r.amount, 0);
+           data = [
+             { Category: 'Total Income (Offerings, Other)', Amount: totalIncome },
+             { Category: 'Total Tithes', Amount: totalTithes },
+             { Category: 'Total Combined Income', Amount: totalIncome + totalTithes },
+             { Category: 'Total Expenses', Amount: totalExpenses },
+             { Category: 'Net Balance', Amount: totalIncome + totalTithes - totalExpenses },
+           ];
+          break;
       }
+      
+      setGeneratedData(data);
+
+      if (data.length === 0) {
+        toast({ title: "No Data", description: "No records found for the selected criteria." });
+        return;
+      }
+
+      if (format === 'csv') {
+        downloadCsv(data, reportTitle);
+      } else {
+        downloadPdf(data, reportTitle, reportType);
+      }
+
+      toast({ title: "Success", description: `Report has been prepared for download.` });
+
     } catch (err: any) {
       setGenerationError(err.message || "Failed to generate report.");
-      toast({ variant: "destructive", title: "Generation Failed", description: err.message || "Failed to generate report." });
+      toast({ variant: "destructive", title: "Generation Failed", description: err.message || "An unknown error occurred." });
     } finally {
-      setIsGeneratingQuarterlyReport(false);
+      setIsGenerating(false);
     }
   };
 
-  const handleIdentifyTrends = async () => {
-    if (!processedTrendData || isProcessedTrendDataEffectivelyEmpty) {
-       toast({ variant: "default", title: "No Data", description: "No data available for the selected period to identify trends." });
-      return;
-    }
-    setIsIdentifyingTrends(true);
-    setGenerationError(null);
-    setFinancialTrends(null);
-    try {
-      const result = await identifyFinancialTrends({ financialData: processedTrendData });
-      setFinancialTrends(result);
-       if ((!result.trends || result.trends.trim() === "") && (!result.insights || result.insights.trim() === "") && (!result.recommendations || result.recommendations.trim() === "")) {
-        toast({ variant: "default", title: "Trends Identified (Empty)", description: "The AI process completed, but the output is empty. This might indicate no significant trends for the period." });
-      } else {
-        toast({ title: "Success", description: "Financial trends identified." });
-      }
-    } catch (err: any) {
-      setGenerationError(err.message || "Failed to identify trends.");
-      toast({ variant: "destructive", title: "Identification Failed", description: err.message || "Failed to identify trends." });
-    } finally {
-      setIsIdentifyingTrends(false);
-    }
-  };
-  
-  const handleDownloadPDF = () => {
-    const printableContent = document.getElementById('printable-report-area');
-    if (printableContent && (quarterlyReport || financialTrends)) {
-        const style = document.createElement('style');
-        style.setAttribute('type', 'text/css');
-        style.innerHTML = `
-            @media print {
-              body * { visibility: hidden !important; }
-              #printable-report-area, #printable-report-area * { visibility: visible !important; }
-              #printable-report-area { 
-                position: absolute !important; 
-                left: 0 !important; 
-                top: 0 !important; 
-                width: 100% !important; 
-                padding: 20px !important; 
-                font-size: 12pt !important;
-              }
-              .no-print { display: none !important; }
-              h1, h2, h3, p, pre, div, span { 
-                color: #000000 !important; 
-                background-color: #ffffff !important;
-                border-color: #cccccc !important;
-              }
-              pre {
-                page-break-inside: auto;
-                white-space: pre-wrap !important;
-                word-wrap: break-word !important;
-              }
-              .card-header, .card-content {
-                padding: 10px !important;
-              }
-              .card {
-                 border: 1px solid #eee !important;
-                 margin-bottom: 20px !important;
-                 page-break-inside: avoid !important;
-              }
-            }
-        `;
-        document.head.appendChild(style);
-        window.print();
-        document.head.removeChild(style); 
-    } else {
-        toast({ variant: "default", title: "Nothing to Download", description: "Please generate a report or identify trends first." });
-    }
-  };
 
   if (authLoading) {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
@@ -269,190 +167,104 @@ export default function ReportsPage() {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Authentication Error</AlertTitle><AlertDescription>{authError.message}</AlertDescription></Alert>;
   }
   if (!authUser) {
-    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Authenticated</AlertTitle><AlertDescription>Please log in to view reports.</AlertDescription></Alert>;
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Authenticated</AlertTitle><AlertDescription>Please log in to generate reports.</AlertDescription></Alert>;
   }
-  
-  const noDataForQuarterlyReport = (
-    !dataIsLoading &&
-    !isLoadingIncome && !isLoadingTithes && !isLoadingExpenses && // Ensure all source data loaded
-    incomeRecords !== undefined && titheRecords !== undefined && expenseRecords !== undefined && // Ensure records are not undefined
-    isProcessedQuarterlyDataEffectivelyEmpty
-  );
-  
-  const noDataForTrendAnalysis = (
-    !dataIsLoading &&
-    !isLoadingIncome && !isLoadingTithes && !isLoadingExpenses && // Ensure all source data loaded
-    incomeRecords !== undefined && titheRecords !== undefined && expenseRecords !== undefined && // Ensure records are not undefined
-    isProcessedTrendDataEffectivelyEmpty
-  );
 
-  const isQuarterlyReportGeneratedEmpty = (
-      quarterlyReport && 
-      (!quarterlyReport.reportSummary || quarterlyReport.reportSummary.trim() === "")
-  );
-
-  const isFinancialTrendsGeneratedEmpty = (
-      financialTrends &&
-      (!financialTrends.trends || financialTrends.trends.trim() === "") &&
-      (!financialTrends.insights || financialTrends.insights.trim() === "") &&
-      (!financialTrends.recommendations || financialTrends.recommendations.trim() === "")
-  );
-
-
-  // PARSER_CHECKPOINT: Just before main return statement
   return (
     <div className="space-y-6 md:space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
           <FileText className="mr-3 h-8 w-8 text-primary" />
-          AI-Powered Financial Reports
+          Financial Reports
         </h1>
-        <Button onClick={handleDownloadPDF} disabled={(!quarterlyReport && !financialTrends) || dataIsLoading || isQuarterlyReportGeneratedEmpty || isFinancialTrendsGeneratedEmpty} className="no-print">
-          <Download className="mr-2 h-4 w-4" />
-          Download Report as PDF
-        </Button>
       </div>
 
-      {dataIsLoading && !authLoading && (
-         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading financial data...</p></div>
-      )}
-      {dataError && !dataIsLoading && (
-         <Alert variant="destructive" className="mt-4"><AlertTriangle className="h-4 w-4" /><AlertTitle>Data Error</AlertTitle><AlertDescription>{dataError.message}</AlertDescription></Alert>
-      )}
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle>Report Generator</CardTitle>
+          <CardDescription>Select your report criteria and download the data in your desired format.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label>1. Select Report Type</Label>
+              <Select value={reportType} onValueChange={(v) => setReportType(v as ReportType)} disabled={isGenerating}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a report type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="summary">Financial Summary</SelectItem>
+                  <SelectItem value="income">Income Report</SelectItem>
+                  <SelectItem value="expenses">Expense Report</SelectItem>
+                  <SelectItem value="tithes">Tithe Report</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>2. Select Period</Label>
+              <RadioGroup value={periodType} onValueChange={(v) => setPeriodType(v as PeriodType)} className="flex items-center space-x-4" disabled={isGenerating}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="monthly" id="monthly" />
+                  <Label htmlFor="monthly">Monthly</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="all" id="all" />
+                  <Label htmlFor="all">All-Time</Label>
+                </div>
+              </RadioGroup>
+            </div>
+          </div>
+          
+          {periodType === 'monthly' && (
+            <div className="space-y-2">
+              <Label>3. Select Month</Label>
+               <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full sm:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(selectedMonth, "MMMM yyyy")}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={selectedMonth}
+                      onSelect={(d) => d && setSelectedMonth(d)}
+                      initialFocus
+                      captionLayout="dropdown-buttons"
+                      fromYear={2020}
+                      toYear={new Date().getFullYear()}
+                    />
+                  </PopoverContent>
+                </Popover>
+            </div>
+          )}
 
-      {generationError && (
-        <Alert variant="destructive" className="no-print">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Generation Error</AlertTitle>
-          <AlertDescription>{generationError}</AlertDescription>
-        </Alert>
-      )}
+          {generationError && (
+             <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{generationError}</AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t">
+            <Button onClick={() => generateReport('pdf')} disabled={isGenerating} className="w-full sm:w-auto">
+              {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Download PDF
+            </Button>
+            <Button onClick={() => generateReport('csv')} disabled={isGenerating} className="w-full sm:w-auto">
+              {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+              Download Excel (CSV)
+            </Button>
+          </div>
+
+        </CardContent>
+      </Card>
       
-      {!dataIsLoading && !dataError && (
-        <div id="printable-report-area">
-          <Card className="shadow-lg">
-            <CardHeader>
-              <CardTitle>Quarterly Summary Report</CardTitle>
-              <CardDescription>Generate a financial summary for a specific quarter.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col sm:flex-row gap-4 no-print">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto justify-start text-left font-normal" disabled={isGeneratingQuarterlyReport || isIdentifyingTrends}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDateQuarterly ? format(startDateQuarterly, "PPP") : <span>Pick start date</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={startDateQuarterly} onSelect={setStartDateQuarterly} initialFocus />
-                  </PopoverContent>
-                </Popover>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto justify-start text-left font-normal" disabled={isGeneratingQuarterlyReport || isIdentifyingTrends}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDateQuarterly ? format(endDateQuarterly, "PPP") : <span>Pick end date</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={endDateQuarterly} onSelect={setEndDateQuarterly} initialFocus />
-                  </PopoverContent>
-                </Popover>
-                <Button onClick={handleGenerateReport} disabled={isGeneratingQuarterlyReport || isIdentifyingTrends || noDataForQuarterlyReport}>
-                  {isGeneratingQuarterlyReport ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LineChart className="mr-2 h-4 w-4" />}
-                  Generate Summary
-                </Button>
-              </div>
-              {noDataForQuarterlyReport && !isGeneratingQuarterlyReport && (
-                   <Alert variant="default" className="mt-4 no-print">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertTitle>No Data for Period</AlertTitle>
-                      <AlertDescription>There are no income, tithe, or expense records in the selected date range for the quarterly report. Please adjust the dates or add records.</AlertDescription>
-                  </Alert>
-              )}
-              {quarterlyReport && (
-                <div className="mt-4 p-4 border rounded-md bg-muted/5">
-                  <h3 className="text-xl font-semibold mb-2 text-foreground">Generated Report:</h3>
-                  {isQuarterlyReportGeneratedEmpty ? (
-                     <p className="text-muted-foreground">The AI generated an empty report for this period, possibly due to no financial activity.</p>
-                  ) : (
-                    <pre className="whitespace-pre-wrap text-sm font-sans bg-background p-3 rounded-md shadow text-foreground">{quarterlyReport.reportSummary}</pre>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-lg mt-6">
-            <CardHeader>
-              <CardTitle>Financial Trends Analysis</CardTitle>
-              <CardDescription>Identify key trends and insights from financial data over a period (default: last 12 months).</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col sm:flex-row gap-4 no-print">
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto justify-start text-left font-normal" disabled={isGeneratingQuarterlyReport || isIdentifyingTrends}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {startDateTrends ? format(startDateTrends, "PPP") : <span>Pick start date</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={startDateTrends} onSelect={setStartDateTrends} initialFocus />
-                  </PopoverContent>
-                </Popover>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-auto justify-start text-left font-normal" disabled={isGeneratingQuarterlyReport || isIdentifyingTrends}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {endDateTrends ? format(endDateTrends, "PPP") : <span>Pick end date</span>}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar mode="single" selected={endDateTrends} onSelect={setEndDateTrends} initialFocus />
-                  </PopoverContent>
-                </Popover>
-                <Button onClick={handleIdentifyTrends} disabled={isIdentifyingTrends || isGeneratingQuarterlyReport || noDataForTrendAnalysis}>
-                  {isIdentifyingTrends ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LineChart className="mr-2 h-4 w-4" />}
-                  Identify Trends
-                </Button>
-              </div>
-               {noDataForTrendAnalysis && !isIdentifyingTrends && (
-                   <Alert variant="default" className="mt-4 no-print">
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertTitle>No Data for Period</AlertTitle>
-                      <AlertDescription>There are no income, tithe, or expense records in the selected date range for trend analysis. Please adjust the dates or add records.</AlertDescription>
-                  </Alert>
-              )}
-              {financialTrends && (
-                <div className="mt-4 p-4 border rounded-md bg-muted/5">
-                  <h3 className="text-xl font-semibold mb-2 text-foreground">Identified Trends & Insights:</h3>
-                  {isFinancialTrendsGeneratedEmpty ? (
-                     <p className="text-muted-foreground">The AI process completed but returned no specific trends, insights, or recommendations for this period.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      <div>
-                        <h4 className="font-medium text-foreground">Key Trends:</h4>
-                        <pre className="whitespace-pre-wrap text-sm font-sans bg-background p-3 rounded-md shadow text-foreground">{financialTrends.trends || "No specific trends identified."}</pre>
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-foreground">Insights for Planning:</h4>
-                        <pre className="whitespace-pre-wrap text-sm font-sans bg-background p-3 rounded-md shadow text-foreground">{financialTrends.insights || "No specific insights provided."}</pre>
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-foreground">Recommendations:</h4>
-                        <pre className="whitespace-pre-wrap text-sm font-sans bg-background p-3 rounded-md shadow text-foreground">{financialTrends.recommendations || "No specific recommendations available."}</pre>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Hidden div for PDF generation */}
+      <div id="pdf-content" className="hidden print:block"></div>
+      
     </div>
   );
 }
-
