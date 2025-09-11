@@ -159,7 +159,7 @@ export type ActivityLogAction =
 export interface ActivityLogRecord {
   id: string;
   userId: string;
-  userDisplayName: string; // Store display name or email at time of logging
+  userEmail: string; // Store user email at time of logging
   action: ActivityLogAction;
   timestamp: Date;
   details?: string; // e.g., "Record ID: xyz123 for Tithe"
@@ -170,7 +170,7 @@ export interface ActivityLogRecord {
 export interface ActivityLogRecordFirestore {
   id: string;
   userId: string;
-  userDisplayName: string;
+  userEmail: string;
   action: ActivityLogAction;
   timestamp: Timestamp;
   details?: string;

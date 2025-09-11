@@ -287,7 +287,7 @@ export default function ExpensesPage() {
       return;
     }
     try {
-      await addExpenseRecord(data, authUser.uid, authUser.displayName || authUser.email);
+      await addExpenseRecord(data, authUser.uid, authUser.email);
       form.reset({ date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "" });
       toast({ title: "Success", description: "Expense record saved successfully." });
     } catch (err) {
@@ -302,7 +302,7 @@ export default function ExpensesPage() {
       return;
     }
     try {
-      await deleteExpenseRecord(record.id, authUser.uid, authUser.displayName || authUser.email);
+      await deleteExpenseRecord(record.id, authUser.uid, authUser.email);
       toast({ title: "Deleted", description: `Expense record for ${format(record.date, "PP")} deleted successfully.` });
     } catch (err) {
       console.error(err);
@@ -321,7 +321,7 @@ export default function ExpensesPage() {
       throw new Error("User not authenticated");
     }
     try {
-      await updateExpenseRecord(recordId, updatedData, authUser.uid, authUser.displayName || authUser.email);
+      await updateExpenseRecord(recordId, updatedData, authUser.uid, authUser.email);
       toast({ title: "Expense Updated", description: `Expense dated ${format(updatedData.date, "PP")} has been updated.`});
       setEditingRecord(null);
     } catch (err) {

@@ -216,7 +216,7 @@ export default function TithesPage() {
       return;
     }
     try {
-      await addTitheRecord(data, currentUser.uid, currentUser.displayName || currentUser.email);
+      await addTitheRecord(data, currentUser.uid, currentUser.email);
       await fetchRecords();
       form.reset({ memberName: "", date: new Date(), amount: 0 });
       toast({ title: "Tithe Saved", description: `Tithe for ${data.memberName} has been successfully saved.` });
@@ -232,7 +232,7 @@ export default function TithesPage() {
       return;
     }
     try {
-      await deleteTitheRecord(id, currentUser.uid, currentUser.displayName || currentUser.email);
+      await deleteTitheRecord(id, currentUser.uid, currentUser.email);
       await fetchRecords();
       toast({
           title: "Tithe Deleted",
@@ -257,7 +257,7 @@ export default function TithesPage() {
     }
     try {
       const { memberName, ...dataToUpdateForService } = updatedData;
-      await updateTitheRecord(recordId, dataToUpdateForService, currentUser.uid, currentUser.displayName || currentUser.email);
+      await updateTitheRecord(recordId, dataToUpdateForService, currentUser.uid, currentUser.email);
       await fetchRecords();
       toast({ title: "Tithe Updated", description: `Tithe for ${updatedData.memberName} has been updated.`});
       setEditingRecord(null);

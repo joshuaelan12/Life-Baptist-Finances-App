@@ -33,7 +33,7 @@ const fromFirestore = (docData: any, id: string): TitheRecord => {
 export const addTitheRecord = async (
   recordData: Omit<TitheRecord, 'id' | 'recordedByUserId' | 'createdAt'>,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<string> => {
   if (!userId) {
     throw new Error('User ID was not provided to addTitheRecord service.');
@@ -46,7 +46,7 @@ export const addTitheRecord = async (
       createdAt: serverTimestamp(),
     });
 
-    await logActivity(userId, userDisplayName, "CREATE_TITHE_RECORD", {
+    await logActivity(userId, userEmail, "CREATE_TITHE_RECORD", {
       recordId: docRef.id,
       collectionName: TITHES_COLLECTION,
       extraInfo: `Member: ${recordData.memberName}, Amount: ${recordData.amount}`
@@ -73,7 +73,7 @@ export const updateTitheRecord = async (
   recordId: string,
   dataToUpdate: Partial<TitheFormValues>,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<void> => {
   if (!userId) {
     throw new Error('User ID was not provided to updateTitheRecord service.');
@@ -86,7 +86,7 @@ export const updateTitheRecord = async (
     }
     await updateDoc(recordRef, updatePayload);
 
-    await logActivity(userId, userDisplayName, "UPDATE_TITHE_RECORD", {
+    await logActivity(userId, userEmail, "UPDATE_TITHE_RECORD", {
       recordId: recordId,
       collectionName: TITHES_COLLECTION,
       extraInfo: `Updated tithe for record.` // Member name is not in dataToUpdate directly
@@ -100,14 +100,14 @@ export const updateTitheRecord = async (
 export const deleteTitheRecord = async (
   recordId: string,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<void> => {
   if (!userId) {
     throw new Error('User ID was not provided to deleteTitheRecord service.');
   }
   try {
     await deleteDoc(doc(db, TITHES_COLLECTION, recordId));
-    await logActivity(userId, userDisplayName, "DELETE_TITHE_RECORD", {
+    await logActivity(userId, userEmail, "DELETE_TITHE_RECORD", {
       recordId: recordId,
       collectionName: TITHES_COLLECTION
     });

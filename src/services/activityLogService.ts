@@ -15,12 +15,12 @@ interface LogActivityDetails {
 
 export const logActivity = async (
   userId: string,
-  userDisplayName: string,
+  userEmail: string,
   action: ActivityLogAction,
   details?: LogActivityDetails
 ): Promise<void> => {
-  if (!userId || !userDisplayName) {
-    console.warn('User ID or Display Name missing, skipping activity log for action:', action);
+  if (!userId || !userEmail) {
+    console.warn('User ID or Email missing, skipping activity log for action:', action);
     // Optionally throw an error or handle as per app's requirements
     // For now, we'll just log a warning and not save the log.
     return;
@@ -35,7 +35,7 @@ export const logActivity = async (
 
     await addDoc(collection(db, ACTIVITY_LOGS_COLLECTION), {
       userId,
-      userDisplayName,
+      userEmail,
       action,
       timestamp: serverTimestamp(),
       details: detailString.trim() || undefined, // Store undefined if empty
@@ -43,7 +43,7 @@ export const logActivity = async (
       collectionName: details?.collectionName || undefined,
     });
   } catch (error) {
-    console.error('Error logging activity: ', error, { userId, userDisplayName, action, details });
+    console.error('Error logging activity: ', error, { userId, userEmail, action, details });
     // Decide if this error should be re-thrown or handled silently
   }
 };

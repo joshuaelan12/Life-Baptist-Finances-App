@@ -31,7 +31,7 @@ const fromFirestore = (docData: any, id: string): IncomeRecord => {
 export const addIncomeRecord = async (
   recordData: Omit<IncomeRecord, 'id' | 'recordedByUserId' | 'createdAt'>,
   userId: string, // Added for explicitness, though auth.currentUser.uid could be used
-  userDisplayName: string
+  userEmail: string
 ): Promise<string> => {
   if (!auth.currentUser || auth.currentUser.uid !== userId) {
     throw new Error('User not authenticated or mismatched ID');
@@ -44,7 +44,7 @@ export const addIncomeRecord = async (
       createdAt: serverTimestamp(),
     });
 
-    await logActivity(userId, userDisplayName, "CREATE_INCOME_RECORD", {
+    await logActivity(userId, userEmail, "CREATE_INCOME_RECORD", {
       recordId: docRef.id,
       collectionName: INCOME_COLLECTION,
       extraInfo: `Amount: ${recordData.amount}, Category: ${recordData.category}`
@@ -74,7 +74,7 @@ export const getIncomeRecords = async (): Promise<IncomeRecord[]> => {
 export const deleteIncomeRecord = async (
   recordId: string,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<void> => {
    if (!auth.currentUser || auth.currentUser.uid !== userId) {
     throw new Error('User not authenticated or mismatched ID for deletion.');
@@ -83,7 +83,7 @@ export const deleteIncomeRecord = async (
     // It might be good to fetch the record to log its details before deleting,
     // but for simplicity, we'll just log the ID.
     await deleteDoc(doc(db, INCOME_COLLECTION, recordId));
-    await logActivity(userId, userDisplayName, "DELETE_INCOME_RECORD", {
+    await logActivity(userId, userEmail, "DELETE_INCOME_RECORD", {
       recordId: recordId,
       collectionName: INCOME_COLLECTION
     });

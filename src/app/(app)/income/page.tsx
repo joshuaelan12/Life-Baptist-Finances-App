@@ -102,7 +102,7 @@ export default function IncomePage() {
       await addIncomeRecord(
         { ...data, category: data.category as IncomeCategory },
         authUser.uid,
-        authUser.displayName || authUser.email
+        authUser.email
       );
       form.reset({ date: new Date(), category: undefined, amount: 0, description: "", memberName: "" });
       toast({ title: "Success", description: "Income record saved successfully." });
@@ -118,7 +118,7 @@ export default function IncomePage() {
       return;
     }
     try {
-      await deleteIncomeRecord(id, authUser.uid, authUser.displayName || authUser.email);
+      await deleteIncomeRecord(id, authUser.uid, authUser.email);
       toast({ title: "Deleted", description: "Income record deleted successfully." });
     } catch (err) {
       console.error(err);

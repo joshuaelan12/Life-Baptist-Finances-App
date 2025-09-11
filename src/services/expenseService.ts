@@ -22,7 +22,7 @@ const EXPENSES_COLLECTION = 'expense_records';
 export const addExpenseRecord = async (
   recordData: ExpenseFormValues,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<string> => {
   if (!userId) {
     throw new Error('User ID is required to add an expense record.');
@@ -36,7 +36,7 @@ export const addExpenseRecord = async (
       category: recordData.category as ExpenseCategory,
     });
 
-    await logActivity(userId, userDisplayName, "CREATE_EXPENSE_RECORD", {
+    await logActivity(userId, userEmail, "CREATE_EXPENSE_RECORD", {
       recordId: docRef.id,
       collectionName: EXPENSES_COLLECTION,
       extraInfo: `Amount: ${recordData.amount}, Category: ${recordData.category}`
@@ -52,7 +52,7 @@ export const updateExpenseRecord = async (
   recordId: string,
   dataToUpdate: ExpenseFormValues,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<void> => {
   if (!userId) {
     throw new Error('User ID is required to update an expense record.');
@@ -65,7 +65,7 @@ export const updateExpenseRecord = async (
     }
     await updateDoc(recordRef, updatePayload);
 
-    await logActivity(userId, userDisplayName, "UPDATE_EXPENSE_RECORD", {
+    await logActivity(userId, userEmail, "UPDATE_EXPENSE_RECORD", {
       recordId: recordId,
       collectionName: EXPENSES_COLLECTION,
       extraInfo: `Updated fields for expense.` // Could be more specific if old vs new values are tracked
@@ -79,14 +79,14 @@ export const updateExpenseRecord = async (
 export const deleteExpenseRecord = async (
   recordId: string,
   userId: string,
-  userDisplayName: string
+  userEmail: string
 ): Promise<void> => {
    if (!userId) {
     throw new Error('User ID is required to delete an expense record.');
   }
   try {
     await deleteDoc(doc(db, EXPENSES_COLLECTION, recordId));
-    await logActivity(userId, userDisplayName, "DELETE_EXPENSE_RECORD", {
+    await logActivity(userId, userEmail, "DELETE_EXPENSE_RECORD", {
       recordId: recordId,
       collectionName: EXPENSES_COLLECTION
     });
