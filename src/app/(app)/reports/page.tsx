@@ -1,16 +1,18 @@
 
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search, User } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -77,9 +79,30 @@ export default function ReportsPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
+  const [titheMemberSearch, setTitheMemberSearch] = useState('');
+
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
   const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
+
+  const filteredTitheRecords = useMemo(() => {
+    if (!titheMemberSearch) return [];
+    return (titheRecords || []).filter(r => 
+      r.memberName.toLowerCase().includes(titheMemberSearch.toLowerCase())
+    ).sort((a,b) => a.date.getTime() - b.date.getTime());
+  }, [titheRecords, titheMemberSearch]);
+
+  const uniqueMemberNames = useMemo(() => {
+    const names = new Set((titheRecords || []).map(r => r.memberName));
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [titheRecords]);
+  
+  const selectedMember = useMemo(() => {
+    if (titheMemberSearch && uniqueMemberNames.includes(titheMemberSearch)) {
+      return titheMemberSearch;
+    }
+    return null;
+  }, [titheMemberSearch, uniqueMemberNames]);
 
   const generateReport = async (formatType: 'pdf' | 'csv') => {
     setIsGenerating(true);
@@ -156,6 +179,19 @@ export default function ReportsPage() {
       setIsGenerating(false);
     }
   };
+  
+  const handleIndividualTitheDownload = () => {
+    if (!selectedMember || filteredTitheRecords.length === 0) {
+      toast({ title: "No Data", description: "Please select a member with records to download." });
+      return;
+    }
+    const reportTitle = `Tithe Statement for ${selectedMember}`;
+    downloadPdf(filteredTitheRecords, reportTitle, 'individual_tithe');
+  }
+
+  const formatCurrency = (value: number) => {
+    return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
+  };
 
 
   if (authLoading) {
@@ -179,7 +215,7 @@ export default function ReportsPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Report Generator</CardTitle>
+          <CardTitle>General Report Generator</CardTitle>
           <CardDescription>Select your report criteria and download the data in your desired format.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -256,10 +292,79 @@ export default function ReportsPage() {
               Download Excel (CSV)
             </Button>
           </div>
-
         </CardContent>
       </Card>
       
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle>Individual Tithe Report</CardTitle>
+          <CardDescription>Search for a member to view and download their individual tithe statement.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+            <div className="space-y-2">
+                <Label htmlFor="member-search">Search Member Name</Label>
+                <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                        id="member-search"
+                        type="search"
+                        placeholder="Start typing a member's name..."
+                        className="pl-8"
+                        value={titheMemberSearch}
+                        onChange={(e) => setTitheMemberSearch(e.target.value)}
+                        list="member-names"
+                    />
+                    <datalist id="member-names">
+                      {uniqueMemberNames.map(name => <option key={name} value={name} />)}
+                    </datalist>
+                </div>
+            </div>
+
+            {selectedMember && (
+                <div>
+                    <h3 className="text-lg font-semibold my-4">Records for: {selectedMember}</h3>
+                    {filteredTitheRecords.length > 0 ? (
+                        <>
+                            <div className="overflow-x-auto border rounded-md">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Date</TableHead>
+                                            <TableHead className="text-right">Amount</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {filteredTitheRecords.map(record => (
+                                            <TableRow key={record.id}>
+                                                <TableCell>{format(record.date, 'PP')}</TableCell>
+                                                <TableCell className="text-right">{formatCurrency(record.amount)}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                            <p className="text-right font-bold mt-2">
+                                Total: {formatCurrency(filteredTitheRecords.reduce((sum, r) => sum + r.amount, 0))}
+                            </p>
+                            <div className="pt-4 border-t mt-4">
+                                <Button onClick={handleIndividualTitheDownload} disabled={!selectedMember || filteredTitheRecords.length === 0}>
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Download PDF for {selectedMember}
+                                </Button>
+                            </div>
+                        </>
+                    ) : (
+                        <p className="text-center text-muted-foreground py-6">No tithe records found for this member.</p>
+                    )}
+                </div>
+            )}
+            {!selectedMember && titheMemberSearch && (
+                 <p className="text-center text-muted-foreground py-6">No member found matching your search.</p>
+            )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
+
+    

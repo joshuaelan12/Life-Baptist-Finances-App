@@ -24,11 +24,13 @@ export const downloadCsv = (data: any[], reportTitle: string) => {
     writeFile(wb, fileName);
 };
 
-const getHeadersAndRows = (data: any[], reportType: string): { headers: string[], rows: string[][] } => {
+const getHeadersAndRows = (data: any[], reportType: string): { headers: string[], rows: any[][], total?: number } => {
     if (data.length === 0) return { headers: [], rows: [] };
 
     let headers: string[] = [];
-    let rows: string[][] = [];
+    let rows: any[][] = [];
+    let total: number | undefined = undefined;
+
     const formatCurrency = (val: number | null | undefined) => {
       if (typeof val !== 'number') return 'N/A';
       return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -71,15 +73,27 @@ const getHeadersAndRows = (data: any[], reportType: string): { headers: string[]
                 formatCurrency(item.Amount)
             ]);
             break;
+        case 'individual_tithe':
+            headers = ['Date', 'Amount'];
+            rows = data.map(item => [
+                item.date ? format(item.date, 'PP') : 'N/A',
+                formatCurrency(item.amount)
+            ]);
+            total = data.reduce((sum, item) => sum + item.amount, 0);
+            break;
         default:
             // Generic fallback for unknown types
             if (data.length > 0) {
-                headers = Object.keys(data[0]);
-                rows = data.map(item => headers.map(header => item[header]));
+                const sanitizedData = data.map(d => {
+                    const { id, recordedByUserId, createdAt, ...rest } = d;
+                    return rest;
+                });
+                headers = Object.keys(sanitizedData[0]);
+                rows = sanitizedData.map(item => headers.map(header => item[header]));
             }
             break;
     }
-    return { headers, rows };
+    return { headers, rows, total };
 };
 
 
@@ -90,7 +104,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     }
 
     const doc = new jsPDF() as jsPDFWithAutoTable;
-    const { headers, rows } = getHeadersAndRows(data, reportType);
+    const { headers, rows, total } = getHeadersAndRows(data, reportType);
     const fileName = `${reportTitle.replace(/\s+/g, '_')}.pdf`;
 
     // Set title
@@ -99,6 +113,8 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     doc.setFontSize(11);
     doc.setTextColor(100);
     doc.text(reportTitle, 14, 30);
+
+    let finalY = (doc as any).lastAutoTable.finalY || 35;
 
     // Add table
     doc.autoTable({
@@ -115,8 +131,26 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         },
         alternateRowStyles: {
             fillColor: [247, 242, 237] // #F7F2ED - Card Color
+        },
+        didDrawPage: (data) => {
+            finalY = data.cursor?.y ?? 35;
         }
     });
 
+    finalY = (doc as any).lastAutoTable.finalY;
+
+    if (total !== undefined) {
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text(
+            `Total: ${total.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+            14,
+            finalY + 10
+        );
+    }
+
+
     doc.save(fileName);
 };
+
+    
