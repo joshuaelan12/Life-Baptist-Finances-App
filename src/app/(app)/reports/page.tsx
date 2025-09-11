@@ -75,7 +75,6 @@ export default function ReportsPage() {
   const [periodType, setPeriodType] = useState<PeriodType>("monthly");
   const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedData, setGeneratedData] = useState<any[] | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
@@ -85,7 +84,6 @@ export default function ReportsPage() {
   const generateReport = async (formatType: 'pdf' | 'csv') => {
     setIsGenerating(true);
     setGenerationError(null);
-    setGeneratedData(null);
     
     const startDate = periodType === 'monthly' ? startOfMonth(selectedMonth) : undefined;
     const endDate = periodType === 'monthly' ? endOfMonth(selectedMonth) : undefined;
@@ -137,8 +135,6 @@ export default function ReportsPage() {
           const { id, recordedByUserId, createdAt, ...rest } = record;
           return rest;
       });
-
-      setGeneratedData(finalData);
 
       if (finalData.length === 0) {
         toast({ title: "No Data", description: "No records found for the selected criteria." });
@@ -263,9 +259,6 @@ export default function ReportsPage() {
 
         </CardContent>
       </Card>
-      
-      {/* Hidden div for PDF generation */}
-      <div id="pdf-content" className="hidden print:block"></div>
       
     </div>
   );

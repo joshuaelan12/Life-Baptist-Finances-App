@@ -1,28 +1,14 @@
 
 import { format } from 'date-fns';
 import { utils, writeFile } from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import type { UserOptions } from 'jspdf-autotable';
 
-// A generic function to convert an array of objects to CSV
-const arrayToCsv = (data: any[]): string => {
-  if (data.length === 0) return "";
-  const headers = Object.keys(data[0]);
-  const csvRows = [
-    headers.join(','), // header row
-    ...data.map(row => 
-      headers.map(fieldName => {
-        let field = row[fieldName];
-        if (field instanceof Date) {
-            return format(field, 'yyyy-MM-dd');
-        }
-        if (typeof field === 'string' && field.includes(',')) {
-          return `"${field}"`; // Handle commas in strings
-        }
-        return field;
-      }).join(',')
-    )
-  ];
-  return csvRows.join('\n');
-};
+// Extend jsPDF with autoTable
+interface jsPDFWithAutoTable extends jsPDF {
+  autoTable: (options: UserOptions) => jsPDF;
+}
 
 export const downloadCsv = (data: any[], reportTitle: string) => {
     if (data.length === 0) {
@@ -38,136 +24,99 @@ export const downloadCsv = (data: any[], reportTitle: string) => {
     writeFile(wb, fileName);
 };
 
-const getHeaders = (reportType: string): string[] => {
-    switch(reportType) {
-        case 'income': return ['Date', 'Category', 'Amount', 'Member Name', 'Description'];
-        case 'expenses': return ['Date', 'Category', 'Amount', 'Payee', 'Payment Method', 'Description'];
-        case 'tithes': return ['Date', 'Member Name', 'Amount'];
-        case 'summary': return ['Category', 'Amount'];
-        default: return [];
-    }
-};
+const getHeadersAndRows = (data: any[], reportType: string): { headers: string[], rows: string[][] } => {
+    if (data.length === 0) return { headers: [], rows: [] };
 
-const getRow = (item: any, reportType: string): string[] => {
-    const formatCurrency = (val: number) => {
+    let headers: string[] = [];
+    let rows: string[][] = [];
+    const formatCurrency = (val: number | null | undefined) => {
       if (typeof val !== 'number') return 'N/A';
       return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    }
-    
+    };
+
     switch(reportType) {
-        case 'income': return [
-            item.date ? format(item.date, 'PP') : 'N/A', 
-            item.category || 'N/A', 
-            formatCurrency(item.amount), 
-            item.memberName || 'N/A', 
-            item.description || 'N/A'
-        ];
-        case 'expenses': return [
-            item.date ? format(item.date, 'PP') : 'N/A',
-            item.category || 'N/A',
-            formatCurrency(item.amount),
-            item.payee || 'N/A',
-            item.paymentMethod || 'N/A',
-            item.description || 'N/A'
-        ];
-        case 'tithes': return [
-            item.date ? format(item.date, 'PP') : 'N/A',
-            item.memberName || 'N/A',
-            formatCurrency(item.amount)
-        ];
-        case 'summary': return [
-            item.Category,
-            formatCurrency(item.Amount)
-        ];
-        default: return [];
+        case 'income':
+            headers = ['Date', 'Category', 'Amount', 'Member Name', 'Description'];
+            rows = data.map(item => [
+                item.date ? format(item.date, 'PP') : 'N/A', 
+                item.category || 'N/A', 
+                formatCurrency(item.amount), 
+                item.memberName || 'N/A', 
+                item.description || 'N/A'
+            ]);
+            break;
+        case 'expenses':
+            headers = ['Date', 'Category', 'Amount', 'Payee', 'Payment Method', 'Description'];
+            rows = data.map(item => [
+                item.date ? format(item.date, 'PP') : 'N/A',
+                item.category || 'N/A',
+                formatCurrency(item.amount),
+                item.payee || 'N/A',
+                item.paymentMethod || 'N/A',
+                item.description || 'N/A'
+            ]);
+            break;
+        case 'tithes':
+            headers = ['Date', 'Member Name', 'Amount'];
+            rows = data.map(item => [
+                item.date ? format(item.date, 'PP') : 'N/A',
+                item.memberName || 'N/A',
+                formatCurrency(item.amount)
+            ]);
+            break;
+        case 'summary':
+            headers = ['Category', 'Amount'];
+            rows = data.map(item => [
+                item.Category,
+                formatCurrency(item.Amount)
+            ]);
+            break;
+        default:
+            // Generic fallback for unknown types
+            if (data.length > 0) {
+                headers = Object.keys(data[0]);
+                rows = data.map(item => headers.map(header => item[header]));
+            }
+            break;
     }
+    return { headers, rows };
 };
 
 
 export const downloadPdf = (data: any[], reportTitle: string, reportType: string) => {
-    const printableContent = document.getElementById('pdf-content');
-    if (!printableContent || data.length === 0) {
+    if (data.length === 0) {
         alert("No data available to generate PDF.");
         return;
     }
 
-    const headers = getHeaders(reportType);
-    const tableRows = data.map(item => `<tr>${getRow(item, reportType).map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('');
+    const doc = new jsPDF() as jsPDFWithAutoTable;
+    const { headers, rows } = getHeadersAndRows(data, reportType);
+    const fileName = `${reportTitle.replace(/\s+/g, '_')}.pdf`;
 
-    printableContent.innerHTML = `
-        <style>
-            @media print {
-              body { 
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                margin: 0;
-                color: #333;
-              }
-              .report-container {
-                padding: 20px;
-              }
-              h1 { 
-                text-align: center; 
-                color: #346F4F; /* Primary Theme Color */
-                font-size: 24px;
-                margin-bottom: 8px;
-              }
-              p.subtitle {
-                text-align: center;
-                margin-top: 0;
-                font-size: 12px;
-                color: #A38B4B; /* Accent Color */
-              }
-              table { 
-                width: 100%; 
-                border-collapse: collapse; 
-                margin-top: 25px;
-                font-size: 10px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-              }
-              th, td { 
-                border: 1px solid #EBE2DA; /* Muted Border */
-                padding: 10px 12px; 
-                text-align: left; 
-              }
-              th { 
-                background-color: #346F4F; /* Primary Theme Color */
-                color: white;
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-              }
-              tr:nth-child(even) { 
-                background-color: #F7F2ED; /* Card Color */
-              }
-              tr:hover {
-                background-color: #EBE2DA; /* Muted Color */
-              }
-              .no-print { 
-                display: none !important; 
-              }
-              @page { 
-                size: A4; 
-                margin: 20mm; 
-              }
-            }
-        </style>
-        <div class="report-container">
-          <h1>Life Baptist Church Mutengene</h1>
-          <p class="subtitle">${reportTitle}</p>
-          <table>
-              <thead>
-                  <tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
-              </thead>
-              <tbody>
-                  ${tableRows}
-              </tbody>
-          </table>
-        </div>
-    `;
+    // Set title
+    doc.setFontSize(18);
+    doc.text("Life Baptist Church Mutengene", 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(reportTitle, 14, 30);
 
-    // Trigger print dialog
-    window.print();
+    // Add table
+    doc.autoTable({
+        head: [headers],
+        body: rows,
+        startY: 35,
+        headStyles: {
+            fillColor: [52, 111, 79], // #346F4F - Primary Theme Color
+            fontSize: 10,
+        },
+        styles: {
+            fontSize: 9,
+            cellPadding: 2.5,
+        },
+        alternateRowStyles: {
+            fillColor: [247, 242, 237] // #F7F2ED - Card Color
+        }
+    });
 
-    // Clean up after printing
-    printableContent.innerHTML = '';
+    doc.save(fileName);
 };
