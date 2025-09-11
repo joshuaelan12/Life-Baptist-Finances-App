@@ -97,25 +97,72 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     printableContent.innerHTML = `
         <style>
             @media print {
-              body { font-family: Arial, sans-serif; margin: 20px; }
-              h1 { text-align: center; color: #333; }
-              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-              th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-              th { background-color: #f2f2f2; }
-              tr:nth-child(even) { background-color: #f9f9f9; }
-              .no-print { display: none !important; }
-              @page { size: A4; margin: 20mm; }
+              body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                color: #333;
+              }
+              .report-container {
+                padding: 20px;
+              }
+              h1 { 
+                text-align: center; 
+                color: #346F4F; /* Primary Theme Color */
+                font-size: 24px;
+                margin-bottom: 8px;
+              }
+              p.subtitle {
+                text-align: center;
+                margin-top: 0;
+                font-size: 12px;
+                color: #A38B4B; /* Accent Color */
+              }
+              table { 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-top: 25px;
+                font-size: 10px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+              th, td { 
+                border: 1px solid #EBE2DA; /* Muted Border */
+                padding: 10px 12px; 
+                text-align: left; 
+              }
+              th { 
+                background-color: #346F4F; /* Primary Theme Color */
+                color: white;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              tr:nth-child(even) { 
+                background-color: #F7F2ED; /* Card Color */
+              }
+              tr:hover {
+                background-color: #EBE2DA; /* Muted Color */
+              }
+              .no-print { 
+                display: none !important; 
+              }
+              @page { 
+                size: A4; 
+                margin: 20mm; 
+              }
             }
         </style>
-        <h1>${reportTitle}</h1>
-        <table>
-            <thead>
-                <tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
-            </thead>
-            <tbody>
-                ${tableRows}
-            </tbody>
-        </table>
+        <div class="report-container">
+          <h1>Life Baptist Church Mutengene</h1>
+          <p class="subtitle">${reportTitle}</p>
+          <table>
+              <thead>
+                  <tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>
+              </thead>
+              <tbody>
+                  ${tableRows}
+              </tbody>
+          </table>
+        </div>
     `;
 
     // Trigger print dialog
