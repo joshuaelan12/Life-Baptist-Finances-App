@@ -49,18 +49,21 @@ const getHeaders = (reportType: string): string[] => {
 };
 
 const getRow = (item: any, reportType: string): string[] => {
-    const formatCurrency = (val: number) => val?.toLocaleString('en-US', { style: 'currency', currency: 'XAF' }).replace('XAF', '').trim() + ' XAF';
+    const formatCurrency = (val: number) => {
+      if (typeof val !== 'number') return 'N/A';
+      return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
     
     switch(reportType) {
         case 'income': return [
-            format(item.date, 'PP'), 
+            item.date ? format(item.date, 'PP') : 'N/A', 
             item.category || 'N/A', 
             formatCurrency(item.amount), 
             item.memberName || 'N/A', 
             item.description || 'N/A'
         ];
         case 'expenses': return [
-            format(item.date, 'PP'),
+            item.date ? format(item.date, 'PP') : 'N/A',
             item.category || 'N/A',
             formatCurrency(item.amount),
             item.payee || 'N/A',
@@ -68,7 +71,7 @@ const getRow = (item: any, reportType: string): string[] => {
             item.description || 'N/A'
         ];
         case 'tithes': return [
-            format(item.date, 'PP'),
+            item.date ? format(item.date, 'PP') : 'N/A',
             item.memberName || 'N/A',
             formatCurrency(item.amount)
         ];

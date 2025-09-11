@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,7 +15,7 @@ import { format, startOfMonth, endOfMonth } from "date-fns";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { downloadCsv, downloadPdf } from '@/lib/report-utils';
@@ -78,12 +78,11 @@ export default function ReportsPage() {
   const [generatedData, setGeneratedData] = useState<any[] | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
-  // Note: These hooks are now primarily for context/awareness, not direct report generation.
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
   const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
 
-  const generateReport = async (format: 'pdf' | 'csv') => {
+  const generateReport = async (formatType: 'pdf' | 'csv') => {
     setIsGenerating(true);
     setGenerationError(null);
     setGeneratedData(null);
@@ -92,29 +91,26 @@ export default function ReportsPage() {
     const endDate = periodType === 'monthly' ? endOfMonth(selectedMonth) : undefined;
 
     try {
-      // This is a placeholder for a server-side function we would build
-      // For now, we will filter data on the client side for simplicity.
-      // In a real app, this should be an API call to a serverless function.
-      let data: any[] = [];
+      let rawData: any[] = [];
       let reportTitle = "";
       const periodString = periodType === 'monthly' ? `for ${format(selectedMonth, "MMMM yyyy")}` : 'for All Time';
 
       switch (reportType) {
         case 'income':
           reportTitle = `Income Report ${periodString}`;
-          data = (incomeRecords || []).filter(r => 
+          rawData = (incomeRecords || []).filter(r => 
             !startDate || (r.date >= startDate && r.date <= endDate!)
           );
           break;
         case 'expenses':
           reportTitle = `Expense Report ${periodString}`;
-          data = (expenseRecords || []).filter(r => 
+          rawData = (expenseRecords || []).filter(r => 
             !startDate || (r.date >= startDate && r.date <= endDate!)
           );
           break;
         case 'tithes':
           reportTitle = `Tithe Report ${periodString}`;
-          data = (titheRecords || []).filter(r => 
+          rawData = (titheRecords || []).filter(r => 
             !startDate || (r.date >= startDate && r.date <= endDate!)
           );
           break;
@@ -123,30 +119,36 @@ export default function ReportsPage() {
            const filteredIncome = (incomeRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
            const filteredTithes = (titheRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
            const filteredExpenses = (expenseRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
-           const totalIncome = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
+           const totalOfferingsAndDonations = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
            const totalTithes = filteredTithes.reduce((sum, r) => sum + r.amount, 0);
            const totalExpenses = filteredExpenses.reduce((sum, r) => sum + r.amount, 0);
-           data = [
-             { Category: 'Total Income (Offerings, Other)', Amount: totalIncome },
+           rawData = [
+             { Category: 'Total Income (Offerings, Donations, etc.)', Amount: totalOfferingsAndDonations },
              { Category: 'Total Tithes', Amount: totalTithes },
-             { Category: 'Total Combined Income', Amount: totalIncome + totalTithes },
+             { Category: 'Total Combined Income', Amount: totalOfferingsAndDonations + totalTithes },
              { Category: 'Total Expenses', Amount: totalExpenses },
-             { Category: 'Net Balance', Amount: totalIncome + totalTithes - totalExpenses },
+             { Category: 'Net Balance', Amount: totalOfferingsAndDonations + totalTithes - totalExpenses },
            ];
           break;
       }
       
-      setGeneratedData(data);
+      // Sanitize data for export: remove id and recordedByUserId
+      const finalData = rawData.map(record => {
+          const { id, recordedByUserId, createdAt, ...rest } = record;
+          return rest;
+      });
 
-      if (data.length === 0) {
+      setGeneratedData(finalData);
+
+      if (finalData.length === 0) {
         toast({ title: "No Data", description: "No records found for the selected criteria." });
         return;
       }
 
-      if (format === 'csv') {
-        downloadCsv(data, reportTitle);
+      if (formatType === 'csv') {
+        downloadCsv(finalData, reportTitle);
       } else {
-        downloadPdf(data, reportTitle, reportType);
+        downloadPdf(finalData, reportTitle, reportType);
       }
 
       toast({ title: "Success", description: `Report has been prepared for download.` });
