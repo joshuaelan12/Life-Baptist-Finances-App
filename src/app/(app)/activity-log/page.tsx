@@ -130,7 +130,7 @@ export default function ActivityLogPage() {
                   {activityLogs.map((log) => (
                     <TableRow key={log.id}>
                       <TableCell>{formatLogTimestamp(log.timestamp)}</TableCell>
-                      <TableCell>{log.userEmail} ({log.userId.substring(0,6)}...)</TableCell>
+                      <TableCell>{log.userEmail}</TableCell>
                       <TableCell>
                         <span className="font-medium">
                           {log.action.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
