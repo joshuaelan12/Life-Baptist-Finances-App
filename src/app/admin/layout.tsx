@@ -25,34 +25,36 @@ export default function AdminLayout({
       return;
     }
 
-    if (!user || authError) {
-      // Not logged in or auth error, redirect to admin login
-      router.replace('/admin/login');
+    if (authError) {
+      console.error("Auth Error in AdminLayout:", authError);
+      setIsAdmin(false); // Treat auth error as not an admin
       return;
     }
 
-    // User is authenticated, now check if they are an admin
-    getUserDocument(user.uid)
-      .then(userDoc => {
-        // Admins are users who do NOT have a user document
-        if (userDoc) {
-          console.log('User has a user document, redirecting. Not an admin.');
-          setIsAdmin(false);
-          router.replace('/dashboard'); // or a dedicated "access-denied" page
-        } else {
-          setIsAdmin(true);
-        }
-      })
-      .catch(err => {
-        console.error("Error checking admin status:", err);
+    if (user) {
+      // User is authenticated, now check if they are an admin
+      getUserDocument(user.uid)
+        .then(userDoc => {
+          // Admins are users who do NOT have a user document
+          if (userDoc) {
+            console.log('User has a user document, redirecting. Not an admin.');
+            router.replace('/dashboard'); // Not an admin, send to regular dashboard
+          } else {
+            setIsAdmin(true); // Is an admin, allow access
+          }
+        })
+        .catch(err => {
+          console.error("Error checking admin status:", err);
+          router.replace('/admin/login'); // Error during check, send to login
+        });
+    } else {
+        // No user logged in, allow children to render (which should be the login page)
         setIsAdmin(false);
-        router.replace('/admin/login');
-      });
-
+    }
   }, [user, authLoading, authError, router]);
 
   // While checking auth state or admin status
-  if (authLoading || isAdmin === null) {
+  if (authLoading || (user && isAdmin === null)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -61,24 +63,21 @@ export default function AdminLayout({
     );
   }
 
-  // If user is confirmed to not be an admin (this is a fallback for the redirect)
-  if (!isAdmin) {
+  // If we have a user and they are an admin, show the protected layout
+  if (user && isAdmin) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-background">
-        <p>Redirecting...</p>
-      </div>
+      <SidebarProvider defaultOpen={true}>
+        <AppSidebar />
+        <SidebarInset className="flex flex-col">
+          <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
+            {children}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
     );
   }
 
-  // Confirmed admin, render the layout
-  return (
-    <SidebarProvider defaultOpen={true}>
-      <AppSidebar />
-      <SidebarInset className="flex flex-col">
-        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
-          {children}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
-  );
+  // If there's no user (and we're not loading), just render the children
+  // This allows the /admin/login page to be displayed.
+  return <>{children}</>;
 }
