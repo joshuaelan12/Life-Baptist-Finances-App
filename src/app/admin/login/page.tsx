@@ -52,6 +52,7 @@ export default function AdminLoginPage() {
         // This is a regular user, not an admin.
         // Sign them out immediately and show an error.
         await signOut(auth);
+        // We use a custom error message to make it clear why the login failed.
         throw new Error("auth/not-an-admin");
       }
 
@@ -61,6 +62,7 @@ export default function AdminLoginPage() {
     } catch (error: any) {
       console.error("Admin login error:", error);
       let errorMessage = "Failed to log in. Please check your credentials.";
+      // Check for our custom error first
       if (error.message === "auth/not-an-admin") {
         errorMessage = "This account does not have admin privileges.";
       } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
