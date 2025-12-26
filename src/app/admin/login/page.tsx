@@ -12,66 +12,57 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { auth } from '@/lib/firebase';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import React from 'react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from 'lucide-react';
-import { createUserDocument } from '@/services/userService';
+import { getUserDocument } from '@/services/userService';
 
-const signupSchema = z.object({
-  fullName: z.string().min(2, { message: "Full name must be at least 2 characters." }),
+const loginSchema = z.object({
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
-  confirmPassword: z.string(),
-}).refine(data => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ["confirmPassword"],
 });
 
-type SignupFormValues = z.infer<typeof signupSchema>;
+type LoginFormValues = z.infer<typeof loginSchema>;
 
-export default function SignupPage() {
+export default function AdminLoginPage() {
   const router = useRouter();
   const [firebaseError, setFirebaseError] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const form = useForm<SignupFormValues>({
-    resolver: zodResolver(signupSchema),
+  const form = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
     defaultValues: {
-      fullName: "",
       email: "",
       password: "",
-      confirmPassword: "",
     },
   });
 
-  const onSubmit = async (data: SignupFormValues) => {
+  const onSubmit = async (data: LoginFormValues) => {
     setFirebaseError(null);
     setIsLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
+
+      // Check if the user is an admin
+      const userDoc = await getUserDocument(user.uid);
       
-      // Update Firebase Auth profile
-      await updateProfile(user, { displayName: data.fullName });
+      // Admin is a user that exists in Auth but NOT in the users collection
+      if (userDoc) {
+        throw new Error("auth/not-an-admin");
+      }
 
-      // Create user document in Firestore
-      await createUserDocument(user.uid, {
-        email: user.email!,
-        displayName: data.fullName,
-        role: 'user' // default role
-      });
-
-      router.push('/dashboard');
+      router.push('/admin/dashboard');
     } catch (error: any) {
-      console.error("Signup error:", error);
-      let errorMessage = "Failed to create account. Please try again.";
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = "This email address is already in use.";
+      console.error("Admin login error:", error);
+      let errorMessage = "Failed to log in. Please check your credentials.";
+      if (error.message === "auth/not-an-admin") {
+        errorMessage = "This account does not have admin privileges.";
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        errorMessage = "Invalid email or password. Please try again.";
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = "The email address is not valid.";
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = "The password is too weak. Please choose a stronger password.";
       }
       setFirebaseError(errorMessage);
     } finally {
@@ -86,14 +77,14 @@ export default function SignupPage() {
           <div className="inline-flex items-center justify-center mb-4">
             <AppLogo className="h-12 w-12 text-primary" />
           </div>
-          <CardTitle className="text-3xl font-bold">Create Account</CardTitle>
-          <CardDescription>Join the finance team for Life Baptist Church.</CardDescription>
+          <CardTitle className="text-3xl font-bold">Admin Login</CardTitle>
+          <CardDescription>Enter your administrator credentials.</CardDescription>
         </CardHeader>
         <CardContent>
           {firebaseError && (
             <Alert variant="destructive" className="mb-4">
               <Terminal className="h-4 w-4" />
-              <AlertTitle>Signup Failed</AlertTitle>
+              <AlertTitle>Login Failed</AlertTitle>
               <AlertDescription>{firebaseError}</AlertDescription>
             </Alert>
           )}
@@ -101,25 +92,12 @@ export default function SignupPage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <FormField
                 control={form.control}
-                name="fullName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Full Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="John Doe" {...field} disabled={isLoading} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
                 name="email"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="name@example.com" {...field} disabled={isLoading} />
+                      <Input type="email" placeholder="admin@example.com" {...field} disabled={isLoading} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -138,32 +116,16 @@ export default function SignupPage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={form.control}
-                name="confirmPassword"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Confirm Password</FormLabel>
-                    <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} disabled={isLoading} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? 'Creating Account...' : 'Sign Up'}
+                {isLoading ? 'Logging In...' : 'Log In as Admin'}
               </Button>
             </form>
           </Form>
         </CardContent>
-        <CardFooter className="flex justify-center">
-          <p className="text-sm text-muted-foreground">
-            Already have an account?{' '}
-            <Link href="/login" className="font-semibold text-primary hover:underline">
-              Log in
-            </Link>
-          </p>
+        <CardFooter className="flex flex-col items-center space-y-2">
+            <Button variant="link" asChild className="p-0 text-sm">
+              <Link href="/login">Log in as a regular user</Link>
+            </Button>
         </CardFooter>
       </Card>
     </div>

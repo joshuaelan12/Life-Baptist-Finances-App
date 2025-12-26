@@ -13,7 +13,7 @@ import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { auth } from '@/lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import React from 'react'; // Import React for useState
+import React from 'react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from 'lucide-react';
 
@@ -111,10 +111,15 @@ export default function LoginPage() {
           </Form>
         </CardContent>
         <CardFooter className="flex flex-col items-center space-y-2">
-          <Button variant="link" className="text-sm" asChild>
-            <Link href="#">Forgot password?</Link>
-          </Button>
-          <p className="text-sm text-muted-foreground">
+           <div className="flex justify-between w-full text-sm">
+            <Button variant="link" asChild className="p-0">
+              <Link href="#">Forgot password?</Link>
+            </Button>
+            <Button variant="link" asChild className="p-0">
+              <Link href="/admin/login">Login as Admin</Link>
+            </Button>
+          </div>
+          <p className="text-sm text-muted-foreground pt-4">
             Don&apos;t have an account?{' '}
             <Link href="/signup" className="font-semibold text-primary hover:underline">
               Sign up
