@@ -12,7 +12,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { auth } from '@/lib/firebase';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import React from 'react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Terminal } from 'lucide-react';
@@ -45,15 +45,19 @@ export default function AdminLoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
 
-      // Check if the user is an admin
+      // Check if the user is an admin (i.e., does NOT have a user document)
       const userDoc = await getUserDocument(user.uid);
       
-      // Admin is a user that exists in Auth but NOT in the users collection
       if (userDoc) {
+        // This is a regular user, not an admin.
+        // Sign them out immediately and show an error.
+        await signOut(auth);
         throw new Error("auth/not-an-admin");
       }
 
+      // If userDoc is null, they are an admin. Proceed to the dashboard.
       router.push('/admin/dashboard');
+
     } catch (error: any) {
       console.error("Admin login error:", error);
       let errorMessage = "Failed to log in. Please check your credentials.";
