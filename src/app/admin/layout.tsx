@@ -7,8 +7,8 @@ import { Loader2 } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { getUserDocument } from '@/services/userService';
-import { AppSidebar } from '@/components/layout/app-sidebar';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { AdminSidebar } from '@/components/layout/admin-sidebar';
 
 export default function AdminLayout({
   children,
@@ -21,39 +21,46 @@ export default function AdminLayout({
 
   useEffect(() => {
     if (authLoading) {
-      // Still waiting for auth state
+      // Still waiting for auth state, do nothing.
       return;
     }
 
     if (authError) {
       console.error("Auth Error in AdminLayout:", authError);
-      setIsAdmin(false); // Treat auth error as not an admin
+      // On auth error, treat as not an admin and redirect to login.
+      setIsAdmin(false);
+      router.replace('/admin/login');
       return;
     }
 
     if (user) {
-      // User is authenticated, now check if they are an admin
+      // User is authenticated, now check if they are an admin.
       getUserDocument(user.uid)
         .then(userDoc => {
-          // Admins are users who do NOT have a user document
+          // An admin is a user who does NOT have a user document.
           if (userDoc) {
-            console.log('User has a user document, redirecting. Not an admin.');
-            router.replace('/dashboard'); // Not an admin, send to regular dashboard
+            console.log('User has a user document, this is not an admin account. Redirecting to user dashboard.');
+            setIsAdmin(false);
+            router.replace('/dashboard'); // Not an admin, send to regular user dashboard.
           } else {
-            setIsAdmin(true); // Is an admin, allow access
+            console.log('User does not have a user document. Verified as admin.');
+            setIsAdmin(true); // Is an admin, allow access.
           }
         })
         .catch(err => {
           console.error("Error checking admin status:", err);
-          router.replace('/admin/login'); // Error during check, send to login
+          setIsAdmin(false);
+          router.replace('/admin/login'); // Error during check, send to admin login.
         });
     } else {
-        // No user logged in, allow children to render (which should be the login page)
+        // No user is logged in.
+        // Don't redirect. Let the child (which should be the login page) render.
+        console.log('No user logged in, allowing render for login page.');
         setIsAdmin(false);
     }
   }, [user, authLoading, authError, router]);
 
-  // While checking auth state or admin status
+  // While checking auth state or verifying admin status for a logged-in user.
   if (authLoading || (user && isAdmin === null)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
@@ -63,11 +70,11 @@ export default function AdminLayout({
     );
   }
 
-  // If we have a user and they are an admin, show the protected layout
+  // If we have a user and they are confirmed to be an admin, show the protected layout.
   if (user && isAdmin) {
     return (
       <SidebarProvider defaultOpen={true}>
-        <AppSidebar />
+        <AdminSidebar />
         <SidebarInset className="flex flex-col">
           <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">
             {children}
@@ -77,7 +84,7 @@ export default function AdminLayout({
     );
   }
 
-  // If there's no user (and we're not loading), just render the children
-  // This allows the /admin/login page to be displayed.
+  // If there's no user (and we're not loading), just render the children.
+  // This is the crucial part that allows the /admin/login page to be displayed.
   return <>{children}</>;
 }
