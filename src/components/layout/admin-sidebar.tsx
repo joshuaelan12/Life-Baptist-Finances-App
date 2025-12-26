@@ -19,6 +19,7 @@ import {
   LogOut,
   Settings,
   Menu,
+  Users,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -36,6 +37,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const navItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: ShieldCheck },
+  { href: '/admin/users', label: 'Manage Users', icon: Users },
   // Add more admin-specific links here in the future
 ];
 

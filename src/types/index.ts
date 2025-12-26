@@ -177,3 +177,19 @@ export interface ActivityLogRecordFirestore {
   collectionName?: string;
   recordId?: string;
 }
+
+// User Profile Types
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'user';
+  createdAt?: Date;
+}
+
+export interface UserProfileFirestore {
+  email: string;
+  displayName: string;
+  role: 'admin' | 'user';
+  createdAt: Timestamp;
+}
