@@ -13,16 +13,23 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "@/hooks/use-toast";
-import { BookUser, PlusCircle, Edit, Trash2, Loader2, AlertTriangle, BadgePercent, Coins, CircleDollarSign } from "lucide-react";
+import { BookUser, PlusCircle, Edit, Trash2, Loader2, AlertTriangle, Coins } from "lucide-react";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp } from 'firebase/firestore';
 import { addAccount, updateAccount, deleteAccount, setBudgetForYear } from '@/services/accountService';
-import type { Account, AccountFirestore, AccountFormValues, AccountType, IncomeRecord, ExpenseRecord } from '@/types';
+import type { Account, AccountFirestore, AccountType, IncomeRecord, ExpenseRecord } from '@/types';
 import { accountSchema, accountTypes } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
+
+// Extend accountSchema for the client-side form to include optional budget fields
+const addAccountFormSchema = accountSchema.extend({
+  initialBudget: z.coerce.number().min(0, "Budget must be zero or more.").optional(),
+  budgetYear: z.coerce.number().optional(),
+});
+type AddAccountFormValues = z.infer<typeof addAccountFormSchema>;
 
 const accountConverter = {
     fromFirestore: (snapshot: any, options: any): Account => {
@@ -66,12 +73,18 @@ export default function AccountsPage() {
     const expenseQuery = useMemo(() => authUser ? collection(db, 'expense_records').withConverter(transactionConverter('expense')) : null, [authUser]);
     const [expenseRecords, loadingExpenses] = useCollectionData(expenseQuery);
 
-    const addForm = useForm<AccountFormValues>({
-        resolver: zodResolver(accountSchema),
-        defaultValues: { code: "", name: "", type: undefined },
+    const addForm = useForm<AddAccountFormValues>({
+        resolver: zodResolver(addAccountFormSchema),
+        defaultValues: {
+            code: "",
+            name: "",
+            type: undefined,
+            initialBudget: 0,
+            budgetYear: new Date().getFullYear(),
+        },
     });
 
-    const editForm = useForm<AccountFormValues>({ resolver: zodResolver(accountSchema) });
+    const editForm = useForm<AddAccountFormValues>({ resolver: zodResolver(accountSchema) });
     const budgetForm = useForm<{ budget: number }>({
         resolver: zodResolver(z.object({ budget: z.coerce.number().min(0, "Budget must be zero or more.") })),
     });
@@ -98,13 +111,26 @@ export default function AccountsPage() {
         return amounts;
     }, [incomeRecords, expenseRecords, selectedYear]);
 
-    const handleAddAccount = async (data: AccountFormValues) => {
+    const handleAddAccount = async (data: AddAccountFormValues) => {
         if (!authUser) return;
         setIsSubmitting(true);
         try {
-            await addAccount(data, authUser.uid, authUser.email);
+            const accountCoreData = { code: data.code, name: data.name, type: data.type };
+            
+            let budgets: Record<string, number> = {};
+            if (data.budgetYear && (data.initialBudget || 0) > 0) {
+                budgets[data.budgetYear] = data.initialBudget!;
+            }
+
+            await addAccount(accountCoreData, budgets, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Account created successfully." });
-            addForm.reset({ code: "", name: "", type: undefined });
+            addForm.reset({
+                code: "",
+                name: "",
+                type: undefined,
+                initialBudget: 0,
+                budgetYear: new Date().getFullYear(),
+            });
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to create account." });
         } finally {
@@ -112,11 +138,12 @@ export default function AccountsPage() {
         }
     };
 
-    const handleUpdateAccount = async (data: AccountFormValues) => {
+    const handleUpdateAccount = async (data: AddAccountFormValues) => {
         if (!authUser || !selectedAccount) return;
         setIsSubmitting(true);
         try {
-            await updateAccount(selectedAccount.id, data, authUser.uid, authUser.email);
+            const updateData = { code: data.code, name: data.name, type: data.type };
+            await updateAccount(selectedAccount.id, updateData, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Account updated successfully." });
             setIsEditDialogOpen(false);
         } catch (error: any) {
@@ -167,6 +194,10 @@ export default function AccountsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
+    const yearOptions = Array.from({length: 2030 - new Date().getFullYear() + 1}, (_, i) => new Date().getFullYear() + i);
+    const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
+
+
     const isLoading = authLoading || loadingAccounts || loadingIncome || loadingExpenses;
 
     if (isLoading) {
@@ -187,12 +218,12 @@ export default function AccountsPage() {
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle>Add New Account</CardTitle>
-                    <CardDescription>Define a new account for tracking finances.</CardDescription>
+                    <CardDescription>Define a new account and set its initial budget for a specific year.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <Form {...addForm}>
                         <form onSubmit={addForm.handleSubmit(handleAddAccount)} className="space-y-4">
-                            <div className="grid md:grid-cols-3 gap-4">
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 <FormField control={addForm.control} name="code" render={({ field }) => (
                                     <FormItem><FormLabel>Account Code/Number</FormLabel><FormControl><Input placeholder="e.g., 1001" {...field} /></FormControl><FormMessage /></FormItem>
                                 )} />
@@ -201,6 +232,14 @@ export default function AccountsPage() {
                                 )} />
                                 <FormField control={addForm.control} name="type" render={({ field }) => (
                                     <FormItem><FormLabel>Account Type</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Select a type" /></SelectTrigger></FormControl><SelectContent>{accountTypes.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>
+                                )} />
+                            </div>
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <FormField control={addForm.control} name="budgetYear" render={({ field }) => (
+                                    <FormItem><FormLabel>Budget Year</FormLabel><Select onValueChange={(v) => field.onChange(Number(v))} value={String(field.value)}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent>{yearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>
+                                )} />
+                                <FormField control={addForm.control} name="initialBudget" render={({ field }) => (
+                                    <FormItem><FormLabel>Initial Budget (XAF)</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
                                 )} />
                             </div>
                             <Button type="submit" disabled={isSubmitting}>
@@ -224,7 +263,7 @@ export default function AccountsPage() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {[...Array(5)].map((_, i) => new Date().getFullYear() - i).map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}
+                                    {pastYearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}
                                 </SelectContent>
                              </Select>
                         </div>
@@ -331,3 +370,5 @@ export default function AccountsPage() {
 }
 
       
+
+    

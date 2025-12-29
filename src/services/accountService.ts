@@ -18,6 +18,7 @@ const ACCOUNTS_COLLECTION = 'accounts';
 
 export const addAccount = async (
   accountData: AccountFormValues,
+  budgets: Record<string, number>,
   userId: string,
   userEmail: string
 ): Promise<string> => {
@@ -29,7 +30,7 @@ export const addAccount = async (
       ...accountData,
       recordedByUserId: userId,
       createdAt: serverTimestamp(),
-      budgets: {}, // Initialize with empty budget map
+      budgets,
     });
 
     await logActivity(userId, userEmail, "CREATE_ACCOUNT", {
@@ -117,3 +118,5 @@ export const setBudgetForYear = async (
     throw new Error(`Failed to set budget for ${year}.`);
   }
 };
+
+    
