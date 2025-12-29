@@ -95,6 +95,7 @@ export default function AccountsPage() {
         const yearEnd = new Date(selectedYear, 11, 31, 23, 59, 59);
         const amounts: Record<string, number> = {};
 
+        // Aggregate income for income-type accounts
         if (incomeRecords) {
             for (const record of incomeRecords) {
                 if (record.accountId && record.date >= yearStart && record.date <= yearEnd) {
@@ -102,14 +103,11 @@ export default function AccountsPage() {
                 }
             }
         }
+        // Aggregate expenses for expense-type accounts
         if (expenseRecords) {
             for (const record of expenseRecords) {
                 if (record.accountId && record.date >= yearStart && record.date <= yearEnd) {
-                    if (amounts[record.accountId]) {
-                      amounts[record.accountId] -= record.amount;
-                    } else {
-                      amounts[record.accountId] = -record.amount;
-                    }
+                    amounts[record.accountId] = (amounts[record.accountId] || 0) + record.amount;
                 }
             }
         }
@@ -377,5 +375,7 @@ export default function AccountsPage() {
         </div>
     );
 }
+
+    
 
     
