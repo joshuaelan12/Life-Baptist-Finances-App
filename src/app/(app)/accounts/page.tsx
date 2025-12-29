@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -104,7 +105,11 @@ export default function AccountsPage() {
         if (expenseRecords) {
             for (const record of expenseRecords) {
                 if (record.accountId && record.date >= yearStart && record.date <= yearEnd) {
-                    amounts[record.accountId] = (amounts[record.accountId] || 0) + record.amount;
+                    if (amounts[record.accountId]) {
+                      amounts[record.accountId] -= record.amount;
+                    } else {
+                      amounts[record.accountId] = -record.amount;
+                    }
                 }
             }
         }
@@ -194,7 +199,7 @@ export default function AccountsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const yearOptions = Array.from({length: 2030 - new Date().getFullYear() + 1}, (_, i) => new Date().getFullYear() + i);
+    const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + i);
     const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
 
 
@@ -293,7 +298,11 @@ export default function AccountsPage() {
                                         return (
                                             <TableRow key={account.id}>
                                                 <TableCell>{account.code}</TableCell>
-                                                <TableCell>{account.name}</TableCell>
+                                                <TableCell>
+                                                    <Link href={`/accounts/${account.id}`} className="hover:underline text-primary font-medium">
+                                                        {account.name}
+                                                    </Link>
+                                                </TableCell>
                                                 <TableCell>{account.type}</TableCell>
                                                 <TableCell>{formatCurrency(budget)}</TableCell>
                                                 <TableCell>{formatCurrency(realized)}</TableCell>
@@ -368,7 +377,5 @@ export default function AccountsPage() {
         </div>
     );
 }
-
-      
 
     
