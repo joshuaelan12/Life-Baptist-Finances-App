@@ -133,7 +133,7 @@ export default function IncomePage() {
   const isLoading = authLoading || loadingIncome || loadingAccounts;
   const dataError = errorIncome || errorAccounts;
 
-  if (isLoading) {
+  if (isLoading && !incomeRecords) { // Show full page loader only on initial load
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -247,7 +247,7 @@ export default function IncomePage() {
                             <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingAccounts}>
                             <FormControl>
                                 <SelectTrigger>
-                                <SelectValue placeholder="Select an income account" />
+                                <SelectValue placeholder={loadingAccounts ? "Loading accounts..." : "Select an income account"} />
                                 </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -304,6 +304,7 @@ export default function IncomePage() {
           <CardTitle>Recent Income Records</CardTitle>
         </CardHeader>
         <CardContent>
+           {loadingIncome && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
           {dataError && (
              <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
@@ -311,7 +312,7 @@ export default function IncomePage() {
               <AlertDescription>{dataError.message}</AlertDescription>
             </Alert>
           )}
-          {!dataError && authUser && (!incomeRecords || incomeRecords.length === 0) && (
+          {!loadingIncome && !dataError && authUser && (!incomeRecords || incomeRecords.length === 0) && (
             <p className="text-center text-muted-foreground py-10">No income records yet. Add one above!</p>
           )}
           {!dataError && authUser && incomeRecords && incomeRecords.length > 0 && (
