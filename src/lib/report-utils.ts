@@ -38,24 +38,26 @@ const getHeadersAndRows = (data: any[], reportType: string): { headers: string[]
 
     switch(reportType) {
         case 'income':
-            headers = ['Date', 'Category', 'Amount', 'Member Name', 'Description'];
+            headers = ['Date', 'Category', 'Amount', 'Member Name', 'Description', 'Account ID'];
             rows = data.map(item => [
                 item.date ? format(item.date, 'PP') : 'N/A', 
                 item.category || 'N/A', 
                 formatCurrency(item.amount), 
                 item.memberName || 'N/A', 
-                item.description || 'N/A'
+                item.description || 'N/A',
+                item.accountId || 'N/A',
             ]);
             break;
         case 'expenses':
-            headers = ['Date', 'Category', 'Amount', 'Payee', 'Payment Method', 'Description'];
+            headers = ['Date', 'Category', 'Amount', 'Payee', 'Payment Method', 'Description', 'Account ID'];
             rows = data.map(item => [
                 item.date ? format(item.date, 'PP') : 'N/A',
                 item.category || 'N/A',
                 formatCurrency(item.amount),
                 item.payee || 'N/A',
                 item.paymentMethod || 'N/A',
-                item.description || 'N/A'
+                item.description || 'N/A',
+                item.accountId || 'N/A',
             ]);
             break;
         case 'tithes':

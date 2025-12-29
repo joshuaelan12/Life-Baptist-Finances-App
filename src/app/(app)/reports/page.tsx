@@ -39,6 +39,7 @@ const incomeConverter = {
       memberName: data.memberName,
       recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
+      accountId: data.accountId,
     };
   }
 };
@@ -64,6 +65,7 @@ const expenseConverter = {
       category: data.category, amount: data.amount, description: data.description,
       payee: data.payee, paymentMethod: data.paymentMethod, recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
+      accountId: data.accountId,
     };
   }
 };

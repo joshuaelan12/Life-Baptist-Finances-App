@@ -592,7 +592,7 @@ export default function ExpensesPage() {
                           <TableCell>{formatCurrency(record.amount)}</TableCell>
                           <TableCell>{record.payee || 'N/A'}</TableCell>
                           <TableCell>{record.paymentMethod || 'N/A'}</TableCell>
-                          <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                          <TableCell className="max-w-[200px] truncate" title={record.description || ''}>{record.description || 'N/A'}</TableCell>
                           <TableCell className="text-right space-x-1">
                             <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense">
                                 <Edit className="h-4 w-4" />
@@ -624,3 +624,5 @@ export default function ExpensesPage() {
     </div>
   );
 }
+
+    
