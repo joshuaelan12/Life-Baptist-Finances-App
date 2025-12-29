@@ -1,40 +1,32 @@
 
+'use server';
+
 import {
   collection,
   addDoc,
   getDocs,
   deleteDoc,
   doc,
+  updateDoc,
   query,
   orderBy,
   serverTimestamp,
   Timestamp,
-  where,
+  type DocumentData,
 } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import type { IncomeRecord, IncomeRecordFirestore, IncomeFormValues } from '@/types';
 import { logActivity } from './activityLogService';
 
 const INCOME_COLLECTION = 'income_records';
 
-// Helper to convert Firestore Timestamps to JS Dates for an IncomeRecord
-const fromFirestore = (docData: any, id: string): IncomeRecord => {
-  const data = docData as Omit<IncomeRecordFirestore, 'id'>;
-  return {
-    ...data,
-    id,
-    date: data.date.toDate(),
-    createdAt: data.createdAt?.toDate(),
-  };
-};
-
 export const addIncomeRecord = async (
-  recordData: Omit<IncomeFormValues, 'id' | 'recordedByUserId' | 'createdAt'>,
+  recordData: IncomeFormValues,
   userId: string,
   userEmail: string
 ): Promise<string> => {
-  if (!auth.currentUser || auth.currentUser.uid !== userId) {
-    throw new Error('User not authenticated or mismatched ID');
+  if (!userId) {
+    throw new Error('User ID is required to add an income record.');
   }
   try {
     const docRef = await addDoc(collection(db, INCOME_COLLECTION), {
@@ -53,21 +45,35 @@ export const addIncomeRecord = async (
     return docRef.id;
   } catch (error) {
     console.error('Error adding income record: ', error);
-    throw error;
+    throw new Error("Failed to save income record.");
   }
 };
 
-export const getIncomeRecords = async (): Promise<IncomeRecord[]> => {
-  if (!auth.currentUser) {
-    return [];
+export const updateIncomeRecord = async (
+  recordId: string,
+  dataToUpdate: IncomeFormValues,
+  userId: string,
+  userEmail: string
+): Promise<void> => {
+  if (!userId) {
+    throw new Error('User ID is required to update an income record.');
   }
-  const q = query(collection(db, INCOME_COLLECTION), orderBy('date', 'desc'));
   try {
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => fromFirestore(doc.data(), doc.id));
+    const recordRef = doc(db, INCOME_COLLECTION, recordId);
+    const updatePayload: any = { ...dataToUpdate };
+    if (dataToUpdate.date) {
+      updatePayload.date = Timestamp.fromDate(dataToUpdate.date);
+    }
+    await updateDoc(recordRef, updatePayload as DocumentData);
+
+    await logActivity(userId, userEmail, "UPDATE_INCOME_RECORD", {
+      recordId: recordId,
+      collectionName: INCOME_COLLECTION,
+      extraInfo: `Updated fields for income record.`
+    });
   } catch (error) {
-    console.error('Error fetching income records: ', error);
-    throw error;
+    console.error('Error updating income record: ', error);
+    throw new Error("Failed to update income record.");
   }
 };
 
@@ -76,8 +82,8 @@ export const deleteIncomeRecord = async (
   userId: string,
   userEmail: string
 ): Promise<void> => {
-   if (!auth.currentUser || auth.currentUser.uid !== userId) {
-    throw new Error('User not authenticated or mismatched ID for deletion.');
+   if (!userId) {
+    throw new Error('User ID is required to delete an income record.');
   }
   try {
     await deleteDoc(doc(db, INCOME_COLLECTION, recordId));
@@ -87,6 +93,8 @@ export const deleteIncomeRecord = async (
     });
   } catch (error) {
     console.error('Error deleting income record: ', error);
-    throw error;
+    throw new Error("Failed to delete income record.");
   }
 };
+
+    

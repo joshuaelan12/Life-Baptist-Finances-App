@@ -13,6 +13,22 @@ export type TitheFormValues = z.infer<typeof titheSchema>;
 
 export type IncomeCategory = "Offering" | "Tithe" | "Donation" | "Other";
 
+// Schema for the income form (used for both creation and editing)
+export const incomeSchema = z.object({
+  date: z.date({ required_error: "Date is required." }),
+  category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
+  amount: z.coerce.number().positive({ message: "Amount must be positive." }),
+  accountId: z.string().min(1, { message: "Account is required." }),
+  description: z.string().optional(),
+  memberName: z.string().optional(),
+}).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
+  message: "Member name is required for tithes.",
+  path: ["memberName"],
+});
+
+export type IncomeFormValues = z.infer<typeof incomeSchema>;
+
+
 // For data coming from Firestore
 export interface IncomeRecordFirestore {
   id: string;
@@ -148,6 +164,7 @@ export interface QuarterlyReportOutput {
 // Activity Log Types
 export type ActivityLogAction =
   | "CREATE_INCOME_RECORD"
+  | "UPDATE_INCOME_RECORD"
   | "DELETE_INCOME_RECORD"
   | "CREATE_EXPENSE_RECORD"
   | "UPDATE_EXPENSE_RECORD"
@@ -233,3 +250,5 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
+
+    

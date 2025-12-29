@@ -10,20 +10,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit } from "lucide-react";
 import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore } from '@/types';
-import { addIncomeRecord, deleteIncomeRecord } from '@/services/incomeService';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore, IncomeFormValues as EditIncomeFormValues } from '@/types';
+import { addIncomeRecord, deleteIncomeRecord, updateIncomeRecord } from '@/services/incomeService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, where, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import type { User } from 'firebase/auth';
 
 const incomeSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
@@ -68,10 +70,200 @@ const accountConverter = {
     toFirestore: (account: Account) => account,
 };
 
+interface EditIncomeDialogProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: IncomeRecord | null;
+  onSave: (updatedData: EditIncomeFormValues, recordId: string) => Promise<void>;
+  currentUser: User | null;
+  incomeAccounts: Account[] | undefined;
+}
+
+const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, incomeAccounts }) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const { toast } = useToast();
+  
+  const editForm = useForm<EditIncomeFormValues>({
+    resolver: zodResolver(incomeSchema),
+  });
+
+  const selectedCategory = editForm.watch("category");
+
+  React.useEffect(() => {
+    if (record && isOpen) {
+      editForm.reset({
+        date: record.date,
+        category: record.category,
+        amount: record.amount,
+        description: record.description || "",
+        memberName: record.memberName || "",
+        accountId: record.accountId || "",
+      });
+    }
+  }, [record, isOpen, editForm]);
+
+  const handleEditSubmit = async (data: EditIncomeFormValues) => {
+    if (!record || !currentUser?.uid) {
+      toast({ variant: "destructive", title: "Error", description: "Cannot save. Record or user information is missing." });
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave(data, record.id);
+      onOpenChange(false);
+    } catch (error) {
+      // Error toast is handled by onSave caller
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (!record) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Income Record</DialogTitle>
+          <DialogDescription>
+            Update the details for this income record. Click save when you're done.
+          </DialogDescription>
+        </DialogHeader>
+        <Form {...editForm}>
+          <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <FormField
+              control={editForm.control}
+              name="date"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Date</FormLabel>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant={"outline"}
+                          className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
+                          disabled={isSaving}
+                        >
+                          {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value}
+                        onSelect={field.onChange}
+                        disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={editForm.control}
+              name="category"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Category</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                    <FormControl>
+                      <SelectTrigger><SelectValue placeholder="Select income category" /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="Offering">Offering</SelectItem>
+                      <SelectItem value="Tithe">Tithe</SelectItem>
+                      <SelectItem value="Donation">Donation</SelectItem>
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={editForm.control}
+              name="amount"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Amount (XAF)</FormLabel>
+                  <FormControl>
+                    <Input type="number" {...field} disabled={isSaving} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={editForm.control}
+              name="accountId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Account</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                    <FormControl>
+                      <SelectTrigger><SelectValue placeholder="Select an income account" /></SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            {selectedCategory === "Tithe" && (
+              <FormField
+                control={editForm.control}
+                name="memberName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Member Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Enter member's name" {...field} disabled={isSaving}/>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+            <FormField
+              control={editForm.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea placeholder="E.g., Special offering for youth ministry" {...field} disabled={isSaving} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter className="pt-4">
+              <DialogClose asChild><Button type="button" variant="outline" disabled={isSaving}>Cancel</Button></DialogClose>
+              <Button type="submit" disabled={isSaving || !currentUser}>
+                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  )
+};
+
 
 export default function IncomePage() {
   const { toast } = useToast();
   const [authUser, authLoading] = useAuthState(auth);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<IncomeRecord | null>(null);
 
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
@@ -111,15 +303,36 @@ export default function IncomePage() {
       toast({ variant: "destructive", title: "Error", description: "Failed to save income record." });
     }
   };
+  
+  const handleOpenEditDialog = (record: IncomeRecord) => {
+    setEditingRecord(record);
+    setIsEditDialogOpen(true);
+  };
+  
+  const handleSaveEditedIncome = async (updatedData: EditIncomeFormValues, recordId: string) => {
+    if (!authUser?.uid || !authUser.email) {
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update an income record." });
+      throw new Error("User not authenticated");
+    }
+    try {
+      await updateIncomeRecord(recordId, updatedData, authUser.uid, authUser.email);
+      toast({ title: "Income Record Updated", description: `Record dated ${format(updatedData.date, "PP")} has been updated.`});
+      setEditingRecord(null);
+    } catch (err) {
+        console.error(err);
+        toast({ variant: "destructive", title: "Error", description: "Failed to update income record." });
+        throw err;
+    }
+  };
 
-  const handleDeleteRecord = async (id: string) => {
+  const handleDeleteRecord = async (record: IncomeRecord) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete records." });
       return;
     }
     try {
-      await deleteIncomeRecord(id, authUser.uid, authUser.email);
-      toast({ title: "Deleted", description: "Income record deleted successfully." });
+      await deleteIncomeRecord(record.id, authUser.uid, authUser.email);
+      toast({ title: "Deleted", description: `Income record from ${format(record.date, "PP")} deleted successfully.` });
     } catch (err) {
       console.error(err);
       toast({ variant: "destructive", title: "Error", description: "Failed to delete income record." });
@@ -133,7 +346,7 @@ export default function IncomePage() {
   const isLoading = authLoading || loadingIncome || loadingAccounts;
   const dataError = errorIncome || errorAccounts;
 
-  if (isLoading && !incomeRecords) { // Show full page loader only on initial load
+  if (isLoading && !incomeRecords && !incomeAccounts) { 
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -316,43 +529,58 @@ export default function IncomePage() {
             <p className="text-center text-muted-foreground py-10">No income records yet. Add one above!</p>
           )}
           {!dataError && authUser && incomeRecords && incomeRecords.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Account</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Member</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {incomeRecords.map((record) => {
-                    const account = incomeAccounts?.find(a => a.id === record.accountId);
-                    return (
-                        <TableRow key={record.id}>
-                            <TableCell>{format(record.date, "PP")}</TableCell>
-                            <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
-                            <TableCell>{record.category}</TableCell>
-                            <TableCell>{formatCurrency(record.amount)}</TableCell>
-                            <TableCell>{record.memberName || 'N/A'}</TableCell>
-                            <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
-                            <TableCell className="text-right">
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record.id)} disabled={!authUser || form.formState.isSubmitting}>
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                                <span className="sr-only">Delete</span>
-                            </Button>
-                            </TableCell>
-                        </TableRow>
-                    );
-                })}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Member</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {incomeRecords.map((record) => {
+                      const account = incomeAccounts?.find(a => a.id === record.accountId);
+                      return (
+                          <TableRow key={record.id}>
+                              <TableCell>{format(record.date, "PP")}</TableCell>
+                              <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
+                              <TableCell>{record.category}</TableCell>
+                              <TableCell>{formatCurrency(record.amount)}</TableCell>
+                              <TableCell>{record.memberName || 'N/A'}</TableCell>
+                              <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                              <TableCell className="text-right space-x-1">
+                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit income">
+                                    <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete income">
+                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </TableCell>
+                          </TableRow>
+                      );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
+      
+      <EditIncomeDialog
+        isOpen={isEditDialogOpen}
+        onOpenChange={setIsEditDialogOpen}
+        record={editingRecord}
+        onSave={handleSaveEditedIncome}
+        currentUser={authUser}
+        incomeAccounts={incomeAccounts}
+      />
     </div>
   );
 }
+
+    
