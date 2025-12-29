@@ -12,7 +12,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
-import type { IncomeRecord, IncomeRecordFirestore } from '@/types';
+import type { IncomeRecord, IncomeRecordFirestore, IncomeFormValues } from '@/types';
 import { logActivity } from './activityLogService';
 
 const INCOME_COLLECTION = 'income_records';
@@ -29,8 +29,8 @@ const fromFirestore = (docData: any, id: string): IncomeRecord => {
 };
 
 export const addIncomeRecord = async (
-  recordData: Omit<IncomeRecord, 'id' | 'recordedByUserId' | 'createdAt'>,
-  userId: string, // Added for explicitness, though auth.currentUser.uid could be used
+  recordData: Omit<IncomeFormValues, 'id' | 'recordedByUserId' | 'createdAt'>,
+  userId: string,
   userEmail: string
 ): Promise<string> => {
   if (!auth.currentUser || auth.currentUser.uid !== userId) {
@@ -80,8 +80,6 @@ export const deleteIncomeRecord = async (
     throw new Error('User not authenticated or mismatched ID for deletion.');
   }
   try {
-    // It might be good to fetch the record to log its details before deleting,
-    // but for simplicity, we'll just log the ID.
     await deleteDoc(doc(db, INCOME_COLLECTION, recordId));
     await logActivity(userId, userEmail, "DELETE_INCOME_RECORD", {
       recordId: recordId,

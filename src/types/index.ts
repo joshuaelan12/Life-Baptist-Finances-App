@@ -23,6 +23,7 @@ export interface IncomeRecordFirestore {
   memberName?: string;
   recordedByUserId: string;
   createdAt: Timestamp; // Firestore Timestamp
+  accountId?: string;
 }
 
 // For client-side form and display
@@ -35,6 +36,7 @@ export interface IncomeRecord {
   memberName?: string;
   recordedByUserId?: string; // Optional on client until save
   createdAt?: Date; // Optional on client until save
+  accountId?: string;
 }
 
 
@@ -91,6 +93,7 @@ export const expenseSchema = z.object({
   description: z.string().optional(),
   payee: z.string().optional(),
   paymentMethod: z.string().optional(),
+  accountId: z.string().min(1, { message: "Account is required." }),
 });
 
 export type ExpenseFormValues = z.infer<typeof expenseSchema>;
@@ -106,6 +109,7 @@ export interface ExpenseRecordFirestore {
   paymentMethod?: string;
   recordedByUserId: string;
   createdAt: Timestamp;
+  accountId?: string;
 }
 
 // For client-side display and manipulation
@@ -119,6 +123,7 @@ export interface ExpenseRecord {
   paymentMethod?: string;
   recordedByUserId: string;
   createdAt?: Date;
+  accountId?: string;
 }
 
 
@@ -154,7 +159,11 @@ export type ActivityLogAction =
   | "USER_LOGOUT"
   | "USER_SIGNUP"
   | "UPDATE_PROFILE"
-  | "CHANGE_PASSWORD";
+  | "CHANGE_PASSWORD"
+  | "CREATE_ACCOUNT"
+  | "UPDATE_ACCOUNT"
+  | "DELETE_ACCOUNT"
+  | "SET_BUDGET";
 
 export interface ActivityLogRecord {
   id: string;
@@ -192,4 +201,35 @@ export interface UserProfileFirestore {
   displayName: string;
   role: 'admin' | 'user';
   createdAt: Timestamp;
+}
+
+// Chart of Accounts Types
+export const accountTypes = ["Income", "Expense", "Assets", "Liability", "Balance"] as const;
+export type AccountType = typeof accountTypes[number];
+
+export const accountSchema = z.object({
+  code: z.string().min(1, "Account code is required."),
+  name: z.string().min(2, "Account name must be at least 2 characters."),
+  type: z.enum(accountTypes, { required_error: "Account type is required." }),
+});
+export type AccountFormValues = z.infer<typeof accountSchema>;
+
+export interface Account {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  // Budgets stored as a map of year to amount, e.g., { '2024': 100000, '2025': 120000 }
+  budgets?: Record<string, number>;
+  createdAt?: Date;
+  recordedByUserId: string;
+}
+
+export interface AccountFirestore {
+  code: string;
+  name: string;
+  type: AccountType;
+  budgets?: Record<string, number>;
+  createdAt: Timestamp;
+  recordedByUserId: string;
 }

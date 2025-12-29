@@ -10,11 +10,9 @@ import {
   serverTimestamp,
   Timestamp,
   type DocumentData,
-  type QueryDocumentSnapshot,
-  type SnapshotOptions,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { ExpenseRecord, ExpenseRecordFirestore, ExpenseFormValues, ExpenseCategory } from '@/types';
+import type { ExpenseFormValues, ExpenseCategory } from '@/types';
 import { logActivity } from './activityLogService';
 
 const EXPENSES_COLLECTION = 'expense_records';
@@ -63,12 +61,12 @@ export const updateExpenseRecord = async (
     if (dataToUpdate.date) {
       updatePayload.date = Timestamp.fromDate(dataToUpdate.date);
     }
-    await updateDoc(recordRef, updatePayload);
+    await updateDoc(recordRef, updatePayload as DocumentData);
 
     await logActivity(userId, userEmail, "UPDATE_EXPENSE_RECORD", {
       recordId: recordId,
       collectionName: EXPENSES_COLLECTION,
-      extraInfo: `Updated fields for expense.` // Could be more specific if old vs new values are tracked
+      extraInfo: `Updated fields for expense.`
     });
   } catch (error) {
     console.error('Error updating expense record: ', error);

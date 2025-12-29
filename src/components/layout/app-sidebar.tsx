@@ -23,7 +23,8 @@ import {
   Settings,
   Menu,
   ReceiptText,
-  History, // Added for Activity Log
+  History,
+  BookUser, // Added for Accounts
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -41,11 +42,12 @@ import { useToast } from '@/hooks/use-toast';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/accounts', label: 'Accounts', icon: BookUser }, // Added Accounts link
   { href: '/income', label: 'Income', icon: DollarSign },
   { href: '/expenses', label: 'Expenses', icon: ReceiptText },
   { href: '/tithes', label: 'Tithes', icon: Users },
   { href: '/reports', label: 'Reports', icon: FileText },
-  { href: '/activity-log', label: 'Activity Log', icon: History }, // Added Activity Log
+  { href: '/activity-log', label: 'Activity Log', icon: History },
 ];
 
 export function AppSidebar() {

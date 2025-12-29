@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,13 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign } from "lucide-react";
 import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore } from '@/types';
+import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore } from '@/types';
 import { addIncomeRecord, deleteIncomeRecord } from '@/services/incomeService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
@@ -29,6 +29,7 @@ const incomeSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
   category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
+  accountId: z.string().min(1, { message: "Account is required." }),
   description: z.string().optional(),
   memberName: z.string().optional(),
 }).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
@@ -39,39 +40,38 @@ const incomeSchema = z.object({
 type IncomeFormValues = z.infer<typeof incomeSchema>;
 
 const incomeConverter = {
-  toFirestore(record: IncomeRecord): DocumentData {
-    const { id, date, createdAt, recordedByUserId, ...rest } = record;
-    const data: any = {
-      ...rest,
-      date: Timestamp.fromDate(date),
-    };
-    if (recordedByUserId) data.recordedByUserId = recordedByUserId;
-    return data;
-  },
-  fromFirestore(
-    snapshot: QueryDocumentSnapshot,
-    options: SnapshotOptions
-  ): IncomeRecord {
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): IncomeRecord => {
     const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
-    const date = data.date instanceof Timestamp ? data.date.toDate() : new Date();
-    const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
-
     return {
       id: snapshot.id,
-      date: date,
+      date: (data.date as Timestamp).toDate(),
       category: data.category,
       amount: data.amount,
       description: data.description,
       memberName: data.memberName,
       recordedByUserId: data.recordedByUserId,
-      createdAt: createdAt,
+      createdAt: (data.createdAt as Timestamp)?.toDate(),
+      accountId: data.accountId,
     };
   }
 };
 
+const accountConverter = {
+    fromFirestore: (snapshot: any, options: any): Account => {
+        const data = snapshot.data(options) as Omit<AccountFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as Account;
+    },
+    toFirestore: (account: Account) => account,
+};
+
+
 export default function IncomePage() {
   const { toast } = useToast();
-  const [authUser, authLoading, authError] = useAuthState(auth);
+  const [authUser, authLoading] = useAuthState(auth);
 
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
@@ -81,18 +81,18 @@ export default function IncomePage() {
       amount: 0,
       description: "",
       memberName: "",
+      accountId: "",
     },
   });
 
   const selectedCategory = form.watch("category");
 
-  const incomeCollectionRef = authUser ? collection(db, 'income_records') : null;
-  const incomeQuery = incomeCollectionRef
-    ? query(incomeCollectionRef, orderBy('date', 'desc')).withConverter<IncomeRecord>(incomeConverter)
-    : null;
-
-  const [incomeRecords, isLoadingData, errorData] = useCollectionData(incomeQuery);
-
+  const incomeQuery = useMemo(() => authUser ? query(collection(db, 'income_records'), orderBy('date', 'desc')).withConverter<IncomeRecord>(incomeConverter) : null, [authUser]);
+  const [incomeRecords, loadingIncome, errorIncome] = useCollectionData(incomeQuery);
+  
+  const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
+  const [incomeAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
+  
   const onSubmit = async (data: IncomeFormValues) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to add income." });
@@ -104,7 +104,7 @@ export default function IncomePage() {
         authUser.uid,
         authUser.email
       );
-      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", memberName: "" });
+      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
       toast({ title: "Success", description: "Income record saved successfully." });
     } catch (err) {
       console.error(err);
@@ -130,30 +130,24 @@ export default function IncomePage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
 
-  if (authLoading) {
+  const isLoading = authLoading || loadingIncome || loadingAccounts;
+  const dataError = errorIncome || errorAccounts;
+
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading user...</p>
-      </div>
-    );
-  }
-
-  if (authError) {
-     return (
-      <div className="space-y-6 md:space-y-8 p-4">
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Authentication Error</AlertTitle>
-          <AlertDescription>Could not load user session: {authError.message}</AlertDescription>
-        </Alert>
+        <p className="ml-4 text-lg">Loading...</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-6 md:space-y-8">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground">Record Income</h1>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+        <DollarSign className="mr-3 h-8 w-8 text-primary" />
+        Record Income
+      </h1>
 
       <Card className="shadow-lg">
         <CardHeader>
@@ -171,7 +165,7 @@ export default function IncomePage() {
           {authUser && (
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid md:grid-cols-2 gap-6">
+                <div className="grid md:grid-cols-3 gap-6">
                   <FormField
                     control={form.control}
                     name="date"
@@ -228,37 +222,58 @@ export default function IncomePage() {
                       </FormItem>
                     )}
                   />
-                </div>
-
-                <FormField
-                  control={form.control}
-                  name="amount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Amount (XAF)</FormLabel>
-                      <FormControl>
-                        <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {selectedCategory === "Tithe" && (
                   <FormField
                     control={form.control}
-                    name="memberName"
+                    name="amount"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Member Name (For 'Tithe' category)</FormLabel>
+                        <FormLabel>Amount (XAF)</FormLabel>
                         <FormControl>
-                          <Input placeholder="Enter member's name" {...field} disabled={form.formState.isSubmitting}/>
+                          <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                )}
+                </div>
+                
+                 <div className="grid md:grid-cols-2 gap-6">
+                    <FormField
+                        control={form.control}
+                        name="accountId"
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Account</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingAccounts}>
+                            <FormControl>
+                                <SelectTrigger>
+                                <SelectValue placeholder="Select an income account" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
+                            </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
+                    {selectedCategory === "Tithe" && (
+                      <FormField
+                        control={form.control}
+                        name="memberName"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Member Name (For 'Tithe' category)</FormLabel>
+                            <FormControl>
+                              <Input placeholder="Enter member's name" {...field} disabled={form.formState.isSubmitting}/>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
+                </div>
 
                 <FormField
                   control={form.control}
@@ -289,30 +304,22 @@ export default function IncomePage() {
           <CardTitle>Recent Income Records</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoadingData && (
-            <div className="flex justify-center items-center py-10">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="ml-2">Loading records...</p>
-            </div>
-          )}
-          {!isLoadingData && errorData && (
+          {dataError && (
              <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Error Loading Records</AlertTitle>
-              <AlertDescription>{errorData.message}</AlertDescription>
+              <AlertDescription>{dataError.message}</AlertDescription>
             </Alert>
           )}
-          {!isLoadingData && !errorData && !authUser && (
-             <p className="text-center text-muted-foreground py-10">Please log in to view income records.</p>
-          )}
-          {!isLoadingData && !errorData && authUser && (!incomeRecords || incomeRecords.length === 0) && (
+          {!dataError && authUser && (!incomeRecords || incomeRecords.length === 0) && (
             <p className="text-center text-muted-foreground py-10">No income records yet. Add one above!</p>
           )}
-          {!isLoadingData && !errorData && authUser && incomeRecords && incomeRecords.length > 0 && (
+          {!dataError && authUser && incomeRecords && incomeRecords.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Account</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Member</TableHead>
@@ -321,21 +328,25 @@ export default function IncomePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {incomeRecords.map((record) => (
-                  <TableRow key={record.id}>
-                    <TableCell>{format(record.date, "PP")}</TableCell>
-                    <TableCell>{record.category}</TableCell>
-                    <TableCell>{formatCurrency(record.amount)}</TableCell>
-                    <TableCell>{record.memberName || 'N/A'}</TableCell>
-                    <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
-                    <TableCell className="text-right">
-                       <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record.id)} disabled={!authUser || form.formState.isSubmitting}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                          <span className="sr-only">Delete</span>
-                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {incomeRecords.map((record) => {
+                    const account = incomeAccounts?.find(a => a.id === record.accountId);
+                    return (
+                        <TableRow key={record.id}>
+                            <TableCell>{format(record.date, "PP")}</TableCell>
+                            <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
+                            <TableCell>{record.category}</TableCell>
+                            <TableCell>{formatCurrency(record.amount)}</TableCell>
+                            <TableCell>{record.memberName || 'N/A'}</TableCell>
+                            <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                            <TableCell className="text-right">
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record.id)} disabled={!authUser || form.formState.isSubmitting}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <span className="sr-only">Delete</span>
+                            </Button>
+                            </TableCell>
+                        </TableRow>
+                    );
+                })}
               </TableBody>
             </Table>
           )}

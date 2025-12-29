@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,30 +16,19 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import type { ExpenseRecord, ExpenseFormValues, ExpenseCategory, ExpenseRecordFirestore } from '@/types';
+import type { ExpenseRecord, ExpenseFormValues, ExpenseCategory, ExpenseRecordFirestore, Account, AccountFirestore } from '@/types';
 import { expenseSchema, expenseCategories } from '@/types';
 import { addExpenseRecord, updateExpenseRecord, deleteExpenseRecord } from '@/services/expenseService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, where, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { User } from 'firebase/auth';
 
 const expenseConverter = {
-  toFirestore(record: ExpenseRecord): DocumentData {
-    const { id, createdAt, ...clientData } = record;
-    const data: Omit<ExpenseRecordFirestore, 'id' | 'createdAt'> = {
-      ...clientData,
-      date: Timestamp.fromDate(record.date),
-    };
-    return data;
-  },
-  fromFirestore(
-    snapshot: QueryDocumentSnapshot,
-    options: SnapshotOptions
-  ): ExpenseRecord {
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): ExpenseRecord => {
     const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
@@ -51,8 +40,21 @@ const expenseConverter = {
       paymentMethod: data.paymentMethod,
       recordedByUserId: data.recordedByUserId,
       createdAt: (data.createdAt as Timestamp)?.toDate(),
+      accountId: data.accountId,
     };
   }
+};
+
+const accountConverter = {
+    fromFirestore: (snapshot: any, options: any): Account => {
+        const data = snapshot.data(options) as Omit<AccountFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as Account;
+    },
+    toFirestore: (account: Account) => account,
 };
 
 interface EditExpenseDialogProps {
@@ -61,9 +63,10 @@ interface EditExpenseDialogProps {
   record: ExpenseRecord | null;
   onSave: (updatedData: ExpenseFormValues, recordId: string) => Promise<void>;
   currentUser: User | null;
+  expenseAccounts: Account[] | undefined;
 }
 
-const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser }) => {
+const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, expenseAccounts }) => {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   const editForm = useForm<ExpenseFormValues>({
@@ -79,6 +82,7 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
         description: record.description || "",
         payee: record.payee || "",
         paymentMethod: record.paymentMethod || "",
+        accountId: record.accountId || "",
       });
     } else if (!isOpen) {
       editForm.reset({
@@ -87,7 +91,8 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
         amount: 0,
         description: "",
         payee: "",
-        paymentMethod: ""
+        paymentMethod: "",
+        accountId: "",
       });
     }
   }, [record, editForm, isOpen]);
@@ -153,6 +158,26 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
                   <FormMessage />
                 </FormItem>
               )}
+            />
+            <FormField
+                control={editForm.control}
+                name="accountId"
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel>Account</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                    <FormControl>
+                        <SelectTrigger>
+                        <SelectValue placeholder="Select an expense account" />
+                        </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                        {expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
+                    </SelectContent>
+                    </Select>
+                    <FormMessage />
+                </FormItem>
+                )}
             />
              <FormField
                 control={editForm.control}
@@ -271,15 +296,16 @@ export default function ExpensesPage() {
       description: "",
       payee: "",
       paymentMethod: "",
+      accountId: "",
     },
   });
 
-  const expensesCollectionRef = authUser ? collection(db, 'expense_records') : null;
-  const expensesQuery = expensesCollectionRef
-    ? query(expensesCollectionRef, orderBy('date', 'desc')).withConverter<ExpenseRecord>(expenseConverter)
-    : null;
+  const expensesQuery = useMemo(() => authUser ? query(collection(db, 'expense_records'), orderBy('date', 'desc')).withConverter<ExpenseRecord>(expenseConverter) : null, [authUser]);
+  const [expenseRecords, loadingExpenses, errorExpenses] = useCollectionData(expensesQuery);
+  
+  const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Expense'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
+  const [expenseAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
 
-  const [expenseRecords, isLoadingData, errorData] = useCollectionData(expensesQuery);
 
   const onSubmit = async (data: ExpenseFormValues) => {
     if (!authUser?.uid || !authUser.email) {
@@ -288,7 +314,7 @@ export default function ExpensesPage() {
     }
     try {
       await addExpenseRecord(data, authUser.uid, authUser.email);
-      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "" });
+      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "", accountId: "" });
       toast({ title: "Success", description: "Expense record saved successfully." });
     } catch (err) {
       console.error(err);
@@ -334,23 +360,26 @@ export default function ExpensesPage() {
   const formatCurrency = (value: number) => {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
+  
+  const isLoading = authLoading || loadingExpenses || loadingAccounts;
+  const dataError = authError || errorExpenses || errorAccounts;
 
-  if (authLoading) {
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading user...</p>
+        <p className="ml-4 text-lg">Loading...</p>
       </div>
     );
   }
 
-  if (authError) {
+  if (dataError) {
      return (
       <div className="space-y-6 md:space-y-8 p-4">
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Authentication Error</AlertTitle>
-          <AlertDescription>Could not load user session: {authError.message}</AlertDescription>
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{dataError.message}</AlertDescription>
         </Alert>
       </div>
     );
@@ -413,6 +442,26 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
+                    <FormField
+                        control={form.control}
+                        name="accountId"
+                        render={({ field }) => (
+                        <FormItem>
+                            <FormLabel>Account</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting}>
+                            <FormControl>
+                                <SelectTrigger>
+                                <SelectValue placeholder="Select an expense account" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                {expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
+                            </SelectContent>
+                            </Select>
+                            <FormMessage />
+                        </FormItem>
+                        )}
+                    />
                   <FormField
                     control={form.control}
                     name="category"
@@ -435,6 +484,8 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
+                </div>
+                 <div className="grid md:grid-cols-3 gap-6">
                    <FormField
                     control={form.control}
                     name="amount"
@@ -448,8 +499,6 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
-                </div>
-                <div className="grid md:grid-cols-2 gap-6">
                    <FormField
                     control={form.control}
                     name="payee"
@@ -517,31 +566,13 @@ export default function ExpensesPage() {
           <CardTitle>Recent Expense Records</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoadingData && (
-            <div className="flex justify-center items-center py-10">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="ml-2">Loading records...</p>
-            </div>
-          )}
-          {!isLoadingData && errorData && (
-             <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Error Loading Records</AlertTitle>
-              <AlertDescription>{errorData.message}</AlertDescription>
-            </Alert>
-          )}
-          {!isLoadingData && !errorData && !authUser && (
-             <p className="text-center text-muted-foreground py-10">Please log in to view expense records.</p>
-          )}
-          {!isLoadingData && !errorData && authUser && (!expenseRecords || expenseRecords.length === 0) && (
-            <p className="text-center text-muted-foreground py-10">No expense records yet. Add one above!</p>
-          )}
-          {!isLoadingData && !errorData && authUser && expenseRecords && expenseRecords.length > 0 && (
+          {!isLoading && expenseRecords && expenseRecords.length > 0 && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
+                    <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Payee</TableHead>
@@ -551,27 +582,34 @@ export default function ExpensesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {expenseRecords.map((record) => (
-                    <TableRow key={record.id}>
-                      <TableCell>{format(record.date, "PP")}</TableCell>
-                      <TableCell>{record.category}</TableCell>
-                      <TableCell>{formatCurrency(record.amount)}</TableCell>
-                      <TableCell>{record.payee || 'N/A'}</TableCell>
-                      <TableCell>{record.paymentMethod || 'N/A'}</TableCell>
-                      <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
-                      <TableCell className="text-right space-x-1">
-                         <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense">
-                            <Edit className="h-4 w-4" />
-                         </Button>
-                         <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete expense">
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {expenseRecords.map((record) => {
+                      const account = expenseAccounts?.find(a => a.id === record.accountId);
+                      return (
+                        <TableRow key={record.id}>
+                          <TableCell>{format(record.date, "PP")}</TableCell>
+                          <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
+                          <TableCell>{record.category}</TableCell>
+                          <TableCell>{formatCurrency(record.amount)}</TableCell>
+                          <TableCell>{record.payee || 'N/A'}</TableCell>
+                          <TableCell>{record.paymentMethod || 'N/A'}</TableCell>
+                          <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                          <TableCell className="text-right space-x-1">
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense">
+                                <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete expense">
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                  })}
                 </TableBody>
               </Table>
             </div>
+          )}
+           {!isLoading && (!expenseRecords || expenseRecords.length === 0) && (
+            <p className="text-center text-muted-foreground py-10">No expense records yet. Add one above!</p>
           )}
         </CardContent>
       </Card>
@@ -581,6 +619,7 @@ export default function ExpensesPage() {
         record={editingRecord}
         onSave={handleSaveEditedExpense}
         currentUser={authUser}
+        expenseAccounts={expenseAccounts}
       />
     </div>
   );
