@@ -7,13 +7,11 @@ import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firesto
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
-import { incomeSchema } from '@/types';
-import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2 } from 'lucide-react';
+import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -23,10 +21,11 @@ import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from 'zod';
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '@/lib/firebase';
-import { addIncomeTransaction, updateIncomeTransaction, deleteIncomeTransaction } from '@/services/incomeTransactionService';
+import { addIncomeTransaction } from '@/services/incomeTransactionService';
 
 const incomeSourceConverter = {
     fromFirestore: (snapshot: any): IncomeSource => {
@@ -52,6 +51,14 @@ const incomeTransactionConverter = {
     toFirestore: (record: IncomeRecord) => record,
 }
 
+const transactionSchema = z.object({
+  code: z.string().min(1, "Transaction code is required."),
+  amount: z.coerce.number().positive("Amount must be positive."),
+  date: z.date({ required_error: "Date is required." }),
+  description: z.string().optional(),
+});
+type TransactionFormValues = z.infer<typeof transactionSchema>;
+
 export default function IncomeSourceDetailsPage() {
     const router = useRouter();
     const params = useParams();
@@ -59,11 +66,10 @@ export default function IncomeSourceDetailsPage() {
     const { toast } = useToast();
     const [authUser, authLoading] = useAuthState(auth);
 
-    const form = useForm<IncomeFormValues>({
-        resolver: zodResolver(incomeSchema.omit({ category: true, accountId: true, memberName: true })),
+    const form = useForm<TransactionFormValues>({
+        resolver: zodResolver(transactionSchema),
         defaultValues: {
             code: "",
-            transactionName: "",
             date: new Date(),
             amount: 0,
             description: "",
@@ -83,7 +89,7 @@ export default function IncomeSourceDetailsPage() {
         return transactions?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
     }, [transactions]);
 
-    const onSubmit = async (data: Omit<IncomeFormValues, 'category'|'accountId'|'memberName'>) => {
+    const onSubmit = async (data: TransactionFormValues) => {
         if (!authUser || !source) return;
         try {
             const transactionData: IncomeFormValues = {
@@ -94,7 +100,7 @@ export default function IncomeSourceDetailsPage() {
             };
             await addIncomeTransaction(transactionData, incomeId, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Transaction recorded." });
-            form.reset();
+            form.reset({ code: "", date: new Date(), amount: 0, description: "" });
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record transaction." });
         }
@@ -228,3 +234,5 @@ export default function IncomeSourceDetailsPage() {
         </div>
     );
 }
+
+    
