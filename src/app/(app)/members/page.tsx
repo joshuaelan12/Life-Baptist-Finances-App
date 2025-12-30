@@ -16,7 +16,7 @@ import { UserPlus, Edit, Trash2, Loader2, AlertTriangle, Users, Search } from "l
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, where } from 'firebase/firestore';
 import { addMember, updateMember, deleteMember } from '@/services/memberService';
 import type { Member, MemberFirestore, MemberFormValues, IncomeRecord, IncomeRecordFirestore } from '@/types';
 import { memberSchema } from '@/types';
