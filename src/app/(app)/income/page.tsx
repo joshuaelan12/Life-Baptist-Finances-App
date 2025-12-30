@@ -2,24 +2,22 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit } from "lucide-react";
-import { format } from "date-fns";
+import { PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore, IncomeFormValues as EditIncomeFormValues, Member, MemberFirestore } from '@/types';
-import { incomeSchema } from '@/types';
-import { addIncomeRecord, deleteIncomeRecord, updateIncomeRecord } from '@/services/incomeService';
+import type { IncomeSource, IncomeSourceFormValues, IncomeCategory, IncomeSourceFirestore, Account, AccountFirestore, Member, MemberFirestore, IncomeRecord } from '@/types';
+import { incomeSourceSchema } from '@/types';
+import { addIncomeSource, deleteIncomeSource, updateIncomeSource, addTitheTransaction } from '@/services/incomeService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -28,23 +26,19 @@ import { collection, query, orderBy, Timestamp, where, type QueryDocumentSnapsho
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { User } from 'firebase/auth';
 
-type IncomeFormValues = z.infer<typeof incomeSchema>;
-
-const incomeConverter = {
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): IncomeRecord => {
-    const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
+const incomeSourceConverter = {
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): IncomeSource => {
+    const data = snapshot.data(options) as Omit<IncomeSourceFirestore, 'id'>;
     return {
       id: snapshot.id,
       code: data.code,
       transactionName: data.transactionName,
-      date: (data.date as Timestamp).toDate(),
       category: data.category,
-      amount: data.amount,
-      description: data.description,
-      memberName: data.memberName,
-      recordedByUserId: data.recordedByUserId,
-      createdAt: (data.createdAt as Timestamp)?.toDate(),
       accountId: data.accountId,
+      description: data.description,
+      budget: data.budget,
+      createdAt: (data.createdAt as Timestamp)?.toDate(),
+      recordedByUserId: data.recordedByUserId,
     };
   }
 };
@@ -73,50 +67,55 @@ const memberConverter = {
     toFirestore: (member: Member) => member,
 };
 
+// Simplified schema for the tithe form part
+const titheOnlySchema = incomeSourceSchema.pick({
+    code: true,
+    transactionName: true,
+    amount: true,
+    accountId: true,
+    memberName: true,
+    description: true,
+});
 
-interface EditIncomeDialogProps {
+interface EditIncomeSourceDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  record: IncomeRecord | null;
-  onSave: (updatedData: EditIncomeFormValues, recordId: string) => Promise<void>;
+  source: IncomeSource | null;
+  onSave: (updatedData: Partial<IncomeSourceFormValues>, sourceId: string) => Promise<void>;
   currentUser: User | null;
   incomeAccounts: Account[] | undefined;
-  members: Member[] | undefined;
 }
 
-const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, incomeAccounts, members }) => {
+const EditIncomeSourceDialog: React.FC<EditIncomeSourceDialogProps> = ({ isOpen, onOpenChange, source, onSave, currentUser, incomeAccounts }) => {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   
-  const editForm = useForm<EditIncomeFormValues>({
-    resolver: zodResolver(incomeSchema),
+  const editForm = useForm<IncomeSourceFormValues>({
+    resolver: zodResolver(incomeSourceSchema),
   });
 
-  const selectedCategory = editForm.watch("category");
-
   React.useEffect(() => {
-    if (record && isOpen) {
+    if (source && isOpen) {
       editForm.reset({
-        code: record.code,
-        transactionName: record.transactionName,
-        date: record.date,
-        category: record.category,
-        amount: record.amount,
-        description: record.description || "",
-        memberName: record.memberName || "",
-        accountId: record.accountId || "",
+        code: source.code,
+        transactionName: source.transactionName,
+        category: source.category,
+        amount: source.budget || 0, // In this context, amount represents the budget
+        accountId: source.accountId || "",
+        description: source.description || "",
       });
     }
-  }, [record, isOpen, editForm]);
+  }, [source, isOpen, editForm]);
 
-  const handleEditSubmit = async (data: EditIncomeFormValues) => {
-    if (!record || !currentUser?.uid) {
+  const handleEditSubmit = async (data: IncomeSourceFormValues) => {
+    if (!source || !currentUser?.uid) {
       toast({ variant: "destructive", title: "Error", description: "Cannot save. Record or user information is missing." });
       return;
     }
     setIsSaving(true);
     try {
-      await onSave(data, record.id);
+      const { memberName, ...updateData } = data; // Exclude memberName as it's not on IncomeSource
+      await onSave(updateData, source.id);
       onOpenChange(false);
     } catch (error) {
       // Error toast is handled by onSave caller
@@ -125,170 +124,51 @@ const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChang
     }
   };
 
-  if (!record) return null;
+  if (!source) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Income Record</DialogTitle>
+          <DialogTitle>Edit Income Source</DialogTitle>
           <DialogDescription>
-            Update the details for this income record. Click save when you're done.
+            Update the details for this income source.
           </DialogDescription>
         </DialogHeader>
         <Form {...editForm}>
           <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-            <FormField
-                control={editForm.control}
-                name="code"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Transaction Code</FormLabel>
-                    <FormControl>
-                    <Input placeholder="e.g., 10011" {...field} disabled={isSaving}/>
-                    </FormControl>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-            <FormField
-                control={editForm.control}
-                name="transactionName"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Transaction Name</FormLabel>
-                    <FormControl>
-                    <Input placeholder="e.g., Sunday Offering" {...field} disabled={isSaving}/>
-                    </FormControl>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-            <FormField
-              control={editForm.control}
-              name="date"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Date</FormLabel>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={"outline"}
-                          className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                          disabled={isSaving}
-                        >
-                          {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value}
-                        onSelect={field.onChange}
-                        disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={editForm.control}
-              name="category"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Category</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select income category" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="Offering">Offering</SelectItem>
-                      <SelectItem value="Tithe">Tithe</SelectItem>
-                      <SelectItem value="Donation">Donation</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={editForm.control}
-              name="amount"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Amount (XAF)</FormLabel>
-                  <FormControl>
-                    <Input type="number" {...field} disabled={isSaving} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={editForm.control}
-              name="accountId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Account</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                    <FormControl>
-                      <SelectTrigger><SelectValue placeholder="Select an income account" /></SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            {selectedCategory === "Tithe" && (
-              <FormField
-                control={editForm.control}
-                name="memberName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Member Name</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                        <FormControl>
-                            <SelectTrigger>
-                            <SelectValue placeholder="Select a member" />
-                            </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                            {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
-                        </SelectContent>
+            <FormField control={editForm.control} name="code" render={({ field }) => (
+                <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={editForm.control} name="transactionName" render={({ field }) => (
+                <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={editForm.control} name="category" render={({ field }) => (
+                <FormItem><FormLabel>Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} disabled>
+                        <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                        <SelectContent><SelectItem value={source.category}>{source.category}</SelectItem></SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
-            <FormField
-              control={editForm.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description (Optional)</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="E.g., Special offering for youth ministry" {...field} disabled={isSaving} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                <FormMessage /></FormItem>
+            )}/>
+            <FormField control={editForm.control} name="accountId" render={({ field }) => (
+                <FormItem><FormLabel>Account</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select an income account" /></SelectTrigger></FormControl>
+                        <SelectContent>{incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                <FormMessage /></FormItem>
+            )}/>
+            <FormField control={editForm.control} name="amount" render={({ field }) => (
+                <FormItem><FormLabel>Budget (XAF)</FormLabel><FormControl><Input type="number" {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
+            )}/>
+            <FormField control={editForm.control} name="description" render={({ field }) => (
+                <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
+            )}/>
             <DialogFooter className="pt-4">
               <DialogClose asChild><Button type="button" variant="outline" disabled={isSaving}>Cancel</Button></DialogClose>
               <Button type="submit" disabled={isSaving || !currentUser}>
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Save Changes
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save Changes
               </Button>
             </DialogFooter>
           </form>
@@ -303,14 +183,13 @@ export default function IncomePage() {
   const { toast } = useToast();
   const [authUser, authLoading] = useAuthState(auth);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingRecord, setEditingRecord] = useState<IncomeRecord | null>(null);
+  const [editingSource, setEditingSource] = useState<IncomeSource | null>(null);
 
-  const form = useForm<IncomeFormValues>({
-    resolver: zodResolver(incomeSchema),
+  const form = useForm<IncomeSourceFormValues>({
+    resolver: zodResolver(incomeSourceSchema),
     defaultValues: {
       code: "",
       transactionName: "",
-      date: new Date(),
       category: undefined,
       amount: 0,
       description: "",
@@ -321,66 +200,70 @@ export default function IncomePage() {
 
   const selectedCategory = form.watch("category");
 
-  const incomeQuery = useMemo(() => authUser ? query(collection(db, 'income_records'), orderBy('date', 'desc')).withConverter<IncomeRecord>(incomeConverter) : null, [authUser]);
-  const [incomeRecords, loadingIncome, errorIncome] = useCollectionData(incomeQuery);
+  const incomeSourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), orderBy('transactionName')).withConverter(incomeSourceConverter) : null, [authUser]);
+  const [incomeSources, loadingSources, errorSources] = useCollectionData(incomeSourcesQuery);
   
+  const titheRecordsQuery = useMemo(() => authUser ? query(collection(db, 'income_records'), where('category', '==', 'Tithe'), orderBy('date', 'desc')) : null, [authUser]);
+  const [titheRecords, loadingTithes, errorTithes] = useCollectionData(titheRecordsQuery);
+
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [incomeAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
   
   const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
   const [members, loadingMembers, errorMembers] = useCollectionData(membersQuery);
 
-  const onSubmit = async (data: IncomeFormValues) => {
+  const onSubmit = async (data: IncomeSourceFormValues) => {
     if (!authUser?.uid || !authUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to add income." });
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in." });
       return;
     }
     try {
-      await addIncomeRecord(
-        { ...data, category: data.category as IncomeCategory },
-        authUser.uid,
-        authUser.email
-      );
-      form.reset({ code: "", transactionName: "", date: new Date(), category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
-      toast({ title: "Success", description: "Income record saved successfully." });
+        if (data.category === 'Tithe') {
+            await addTitheTransaction({ ...data, date: new Date() }, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Tithe record saved successfully." });
+        } else {
+            await addIncomeSource({ ...data, category: data.category as IncomeCategory }, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Income source created successfully." });
+        }
+        form.reset({ code: "", transactionName: "", category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
     } catch (err) {
       console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to save income record." });
+      toast({ variant: "destructive", title: "Error", description: "Failed to save record." });
     }
   };
   
-  const handleOpenEditDialog = (record: IncomeRecord) => {
-    setEditingRecord(record);
+  const handleOpenEditDialog = (source: IncomeSource) => {
+    setEditingSource(source);
     setIsEditDialogOpen(true);
   };
   
-  const handleSaveEditedIncome = async (updatedData: EditIncomeFormValues, recordId: string) => {
+  const handleSaveEditedSource = async (updatedData: Partial<IncomeSourceFormValues>, sourceId: string) => {
     if (!authUser?.uid || !authUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update an income record." });
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update." });
       throw new Error("User not authenticated");
     }
     try {
-      await updateIncomeRecord(recordId, updatedData, authUser.uid, authUser.email);
-      toast({ title: "Income Record Updated", description: `Record dated ${format(updatedData.date, "PP")} has been updated.`});
-      setEditingRecord(null);
+      await updateIncomeSource(sourceId, updatedData, authUser.uid, authUser.email);
+      toast({ title: "Income Source Updated", description: `${updatedData.transactionName} has been updated.`});
+      setEditingSource(null);
     } catch (err) {
         console.error(err);
-        toast({ variant: "destructive", title: "Error", description: "Failed to update income record." });
+        toast({ variant: "destructive", title: "Error", description: "Failed to update income source." });
         throw err;
     }
   };
 
-  const handleDeleteRecord = async (record: IncomeRecord) => {
+  const handleDeleteRecord = async (source: IncomeSource) => {
     if (!authUser?.uid || !authUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete records." });
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete." });
       return;
     }
     try {
-      await deleteIncomeRecord(record.id, authUser.uid, authUser.email);
-      toast({ title: "Deleted", description: `Income record from ${format(record.date, "PP")} deleted successfully.` });
+      await deleteIncomeSource(source.id, authUser.uid, authUser.email);
+      toast({ title: "Deleted", description: `Income source deleted successfully.` });
     } catch (err) {
       console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to delete income record." });
+      toast({ variant: "destructive", title: "Error", description: "Failed to delete income source." });
     }
   };
   
@@ -388,17 +271,8 @@ export default function IncomePage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
 
-  const isLoading = authLoading || loadingIncome || loadingAccounts || loadingMembers;
-  const dataError = errorIncome || errorAccounts || errorMembers;
-
-  if (isLoading && !incomeRecords && !incomeAccounts) { 
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading...</p>
-      </div>
-    );
-  }
+  const isLoading = authLoading || loadingSources || loadingAccounts || loadingMembers || loadingTithes;
+  const dataError = errorSources || errorAccounts || errorMembers || errorTithes;
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -409,8 +283,8 @@ export default function IncomePage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Add New Income</CardTitle>
-          <CardDescription>Enter the details of the income received. For tithes, select the member from the list.</CardDescription>
+          <CardTitle>Add New Income Record</CardTitle>
+          <CardDescription>Create a budgeted income source (e.g., Offerings) or record a direct transaction (e.g., Tithe).</CardDescription>
         </CardHeader>
         <CardContent>
           {!authUser && (
@@ -423,168 +297,65 @@ export default function IncomePage() {
           {authUser && (
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid md:grid-cols-3 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="code"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Transaction Code</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g., 10011" {...field} disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="transactionName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Transaction Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g., Sunday Offering" {...field} disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="date"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel>Date</FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant={"outline"}
-                                className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                                disabled={form.formState.isSubmitting}
-                              >
-                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                
-                 <div className="grid md:grid-cols-3 gap-6">
-                    <FormField
-                      control={form.control}
-                      name="category"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Category</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting}>
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select income category" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="Offering">Offering</SelectItem>
-                              <SelectItem value="Tithe">Tithe</SelectItem>
-                              <SelectItem value="Donation">Donation</SelectItem>
-                              <SelectItem value="Other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Amount (XAF)</FormLabel>
-                          <FormControl>
-                            <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                        control={form.control}
-                        name="accountId"
-                        render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Account</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingAccounts}>
-                            <FormControl>
-                                <SelectTrigger>
-                                <SelectValue placeholder={loadingAccounts ? "Loading accounts..." : "Select an income account"} />
-                                </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                                {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
-                            </SelectContent>
-                            </Select>
-                            <FormMessage />
-                        </FormItem>
-                        )}
-                    />
-                </div>
-                
-                <div className="grid md:grid-cols-3 gap-6">
-                    {selectedCategory === "Tithe" && (
-                      <FormField
-                        control={form.control}
-                        name="memberName"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Member Name</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingMembers}>
-                                <FormControl>
-                                    <SelectTrigger>
-                                    <SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} />
-                                    </SelectTrigger>
-                                </FormControl>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <FormField control={form.control} name="category" render={({ field }) => (
+                        <FormItem><FormLabel>Category</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting}>
+                                <FormControl><SelectTrigger><SelectValue placeholder="Select income category" /></SelectTrigger></FormControl>
                                 <SelectContent>
-                                    {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
+                                    <SelectItem value="Offering">Offering</SelectItem>
+                                    <SelectItem value="Tithe">Tithe</SelectItem>
+                                    <SelectItem value="Donation">Donation</SelectItem>
+                                    <SelectItem value="Other">Other</SelectItem>
                                 </SelectContent>
                             </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
+                        <FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="code" render={({ field }) => (
+                        <FormItem><FormLabel>Code</FormLabel><FormControl><Input placeholder="e.g., 10011" {...field} disabled={form.formState.isSubmitting}/></FormControl><FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="transactionName" render={({ field }) => (
+                        <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g., Sunday Offering" {...field} disabled={form.formState.isSubmitting}/></FormControl><FormMessage /></FormItem>
+                    )}/>
+                </div>
+                
+                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <FormField control={form.control} name="accountId" render={({ field }) => (
+                        <FormItem><FormLabel>Account</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingAccounts}>
+                            <FormControl><SelectTrigger><SelectValue placeholder={loadingAccounts ? "Loading accounts..." : "Select an income account"} /></SelectTrigger></FormControl>
+                            <SelectContent>{incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
+                            </Select>
+                        <FormMessage /></FormItem>
+                    )}/>
+                    <FormField control={form.control} name="amount" render={({ field }) => (
+                        <FormItem><FormLabel>{selectedCategory === 'Tithe' ? 'Amount (XAF)' : 'Annual Budget (XAF)'}</FormLabel>
+                            <FormControl><Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/></FormControl>
+                        <FormMessage /></FormItem>
+                    )}/>
+                    {selectedCategory === "Tithe" && (
+                        <FormField control={form.control} name="memberName" render={({ field }) => (
+                            <FormItem><FormLabel>Member Name</FormLabel>
+                                <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingMembers}>
+                                    <FormControl><SelectTrigger><SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} /></SelectTrigger></FormControl>
+                                    <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
+                                </Select>
+                            <FormMessage /></FormItem>
+                        )}/>
                     )}
-                     <FormField
-                      control={form.control}
-                      name="description"
-                      render={({ field }) => (
-                        <FormItem className={selectedCategory === "Tithe" ? 'md:col-span-2' : 'md:col-span-3'}>
-                          <FormLabel>Description (Optional)</FormLabel>
-                          <FormControl>
-                            <Textarea placeholder="E.g., Special offering for youth ministry" {...field} disabled={form.formState.isSubmitting}/>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                </div>
+                
+                <div className="grid grid-cols-1">
+                    <FormField control={form.control} name="description" render={({ field }) => (
+                        <FormItem><FormLabel>Description (Optional)</FormLabel>
+                            <FormControl><Textarea placeholder="E.g., Special offering for youth ministry" {...field} disabled={form.formState.isSubmitting}/></FormControl>
+                        <FormMessage /></FormItem>
+                    )}/>
                 </div>
 
-                <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !authUser}>
+                <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !authUser || !selectedCategory}>
                   {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
-                   Save Income
+                   {selectedCategory === 'Tithe' ? 'Save Tithe' : 'Create Income Source'}
                 </Button>
               </form>
             </Form>
@@ -594,10 +365,11 @@ export default function IncomePage() {
       
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Recent Income Records</CardTitle>
+          <CardTitle>Manage Income</CardTitle>
+          <CardDescription>View and manage budgeted income sources and direct tithe records.</CardDescription>
         </CardHeader>
         <CardContent>
-           {loadingIncome && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
+           {isLoading && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
           {dataError && (
              <Alert variant="destructive">
               <AlertTriangle className="h-4 w-4" />
@@ -605,49 +377,55 @@ export default function IncomePage() {
               <AlertDescription>{dataError.message}</AlertDescription>
             </Alert>
           )}
-          {!loadingIncome && !dataError && authUser && (!incomeRecords || incomeRecords.length === 0) && (
+          {!isLoading && !dataError && authUser && (!incomeSources || incomeSources.length === 0) && (!titheRecords || titheRecords.length === 0) && (
             <p className="text-center text-muted-foreground py-10">No income records yet. Add one above!</p>
           )}
-          {!dataError && authUser && incomeRecords && incomeRecords.length > 0 && (
+          {!dataError && authUser && (incomeSources?.length > 0 || titheRecords?.length > 0) && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Code</TableHead>
-                    <TableHead>Transaction Name</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Account</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead>Amount</TableHead>
+                    <TableHead>Account</TableHead>
+                    <TableHead>Amount / Budget</TableHead>
                     <TableHead>Member</TableHead>
-                    <TableHead>Description</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {incomeRecords.map((record) => {
-                      const account = incomeAccounts?.find(a => a.id === record.accountId);
+                  {incomeSources?.map((source) => {
+                      const account = incomeAccounts?.find(a => a.id === source.accountId);
+                      const isBudgeted = source.category !== 'Tithe';
                       return (
-                          <TableRow key={record.id}>
-                              <TableCell>{record.code}</TableCell>
-                              <TableCell>{record.transactionName}</TableCell>
-                              <TableCell>{format(record.date, "PP")}</TableCell>
+                          <TableRow key={source.id}>
+                              <TableCell>{source.code}</TableCell>
+                              <TableCell>
+                                {isBudgeted ? (
+                                    <Link href={`/income/${source.id}`} className="hover:underline text-primary font-medium">
+                                        {source.transactionName}
+                                    </Link>
+                                ) : (
+                                    source.transactionName
+                                )}
+                              </TableCell>
+                              <TableCell>{source.category}</TableCell>
                               <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
-                              <TableCell>{record.category}</TableCell>
-                              <TableCell>{formatCurrency(record.amount)}</TableCell>
-                              <TableCell>{record.memberName || 'N/A'}</TableCell>
-                              <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>                              
+                              <TableCell>{formatCurrency(source.budget || 0)}</TableCell>
+                              <TableCell>{'N/A'}</TableCell>
                               <TableCell className="text-right space-x-1">
-                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit income">
+                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit income source">
                                     <Edit className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete income">
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete income source">
                                     <Trash2 className="h-4 w-4 text-destructive" />
                                 </Button>
                               </TableCell>
                           </TableRow>
                       );
                   })}
+                  {/* We can show tithes here too if needed, or keep them separate */}
                 </TableBody>
               </Table>
             </div>
@@ -655,17 +433,14 @@ export default function IncomePage() {
         </CardContent>
       </Card>
       
-      <EditIncomeDialog
+      <EditIncomeSourceDialog
         isOpen={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
-        record={editingRecord}
-        onSave={handleSaveEditedIncome}
+        source={editingSource}
+        onSave={handleSaveEditedSource}
         currentUser={authUser}
         incomeAccounts={incomeAccounts}
-        members={members}
       />
     </div>
   );
 }
-
-    

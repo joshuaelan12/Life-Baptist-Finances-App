@@ -2,18 +2,53 @@
 import type { Timestamp } from 'firebase/firestore';
 import { z } from 'zod';
 
-// For TithesPage form - DEPRECATED but kept for reference during transition
-export const titheSchema = z.object({
-  date: z.date({ required_error: "Date is required." }),
-  amount: z.coerce.number().positive({ message: "Amount must be positive." }),
-  memberId: z.string().min(1, "A member must be selected."),
+// Schema for the income source form (used for creating budgeted income items)
+export const incomeSourceSchema = z.object({
+  code: z.string().min(1, { message: "Transaction code is required." }),
+  transactionName: z.string().min(1, { message: "Transaction name is required." }),
+  category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
+  accountId: z.string().min(1, { message: "Account is required." }),
+  description: z.string().optional(),
+  // For non-Tithe items, this will be the budget. For Tithes, it's the actual amount.
+  amount: z.coerce.number().positive({ message: "Amount or Budget must be positive." }),
+  memberName: z.string().optional(),
+}).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
+  message: "Member name is required for tithes.",
+  path: ["memberName"],
 });
-export type TitheFormValues = z.infer<typeof titheSchema>;
+export type IncomeSourceFormValues = z.infer<typeof incomeSourceSchema>;
+
+// For data coming from Firestore (Income Source)
+export interface IncomeSourceFirestore {
+  id: string;
+  code: string;
+  transactionName: string;
+  category: IncomeCategory;
+  accountId?: string;
+  description?: string;
+  budget?: number; // Annual budget for Offering, Donation, Other
+  recordedByUserId: string;
+  createdAt: Timestamp;
+}
+
+// For client-side display (Income Source)
+export interface IncomeSource {
+  id: string;
+  code: string;
+  transactionName: string;
+  category: IncomeCategory;
+  accountId?: string;
+  description?: string;
+  budget?: number;
+  createdAt?: Date;
+  recordedByUserId?: string;
+}
 
 
+// Tithes are now a special type of direct transaction within the income system.
+// The existing IncomeRecord can represent a tithe transaction directly.
 export type IncomeCategory = "Offering" | "Tithe" | "Donation" | "Other";
 
-// Schema for the income form (used for both creation and editing)
 export const incomeSchema = z.object({
   code: z.string().min(1, { message: "Transaction code is required." }),
   transactionName: z.string().min(1, { message: "Transaction name is required." }),
@@ -27,60 +62,38 @@ export const incomeSchema = z.object({
   message: "Member name is required for tithes.",
   path: ["memberName"],
 });
-
 export type IncomeFormValues = z.infer<typeof incomeSchema>;
 
 
-// For data coming from Firestore
+// This now represents a single transaction record (for tithes or for transactions under an income source)
 export interface IncomeRecordFirestore {
   id: string;
   code: string;
   transactionName: string;
-  date: Timestamp; // Firestore Timestamp
+  date: Timestamp;
   category: IncomeCategory;
   amount: number;
   description?: string;
   memberName?: string;
   recordedByUserId: string;
-  createdAt: Timestamp; // Firestore Timestamp
+  createdAt: Timestamp;
   accountId?: string;
+  incomeSourceId?: string; // Links transaction to a budgeted income source
 }
 
-// For client-side form and display
 export interface IncomeRecord {
   id: string;
   code: string;
   transactionName: string;
-  date: Date; // JavaScript Date object
+  date: Date;
   category: IncomeCategory;
   amount: number;
   description?: string;
   memberName?: string;
-  recordedByUserId?: string; // Optional on client until save
-  createdAt?: Date; // Optional on client until save
-  accountId?: string;
-}
-
-
-// TitheRecord types are now deprecated in favor of IncomeRecord with "Tithe" category
-export interface TitheRecord {
-  id:string;
-  memberId: string;
-  memberName: string;
-  date: Date; // JavaScript Date object
-  amount: number;
   recordedByUserId?: string;
   createdAt?: Date;
-}
-
-export interface TitheRecordFirestore {
-  id:string;
-  memberId: string;
-  memberName: string;
-  date: Timestamp;
-  amount: number;
-  recordedByUserId: string;
-  createdAt: Timestamp;
+  accountId?: string;
+  incomeSourceId?: string; // Links transaction to a budgeted income source
 }
 
 // Member Management
@@ -194,15 +207,18 @@ export interface QuarterlyReportOutput {
 
 // Activity Log Types
 export type ActivityLogAction =
+  | "CREATE_INCOME_SOURCE"
+  | "UPDATE_INCOME_SOURCE"
+  | "DELETE_INCOME_SOURCE"
+  | "CREATE_INCOME_TRANSACTION"
+  | "UPDATE_INCOME_TRANSACTION"
+  | "DELETE_INCOME_TRANSACTION"
   | "CREATE_INCOME_RECORD"
   | "UPDATE_INCOME_RECORD"
   | "DELETE_INCOME_RECORD"
   | "CREATE_EXPENSE_RECORD"
   | "UPDATE_EXPENSE_RECORD"
   | "DELETE_EXPENSE_RECORD"
-  | "CREATE_TITHE_RECORD"
-  | "UPDATE_TITHE_RECORD"
-  | "DELETE_TITHE_RECORD"
   | "USER_LOGIN"
   | "USER_LOGOUT"
   | "USER_SIGNUP"
@@ -284,5 +300,3 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
-
-    
