@@ -12,6 +12,8 @@ import {
   orderBy,
   serverTimestamp,
   Timestamp,
+  where,
+  getDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { TitheRecord, TitheRecordFirestore, TitheFormValues } from '@/types';
@@ -31,9 +33,10 @@ const fromFirestore = (docData: any, id: string): TitheRecord => {
 };
 
 export const addTitheRecord = async (
-  recordData: Omit<TitheRecord, 'id' | 'recordedByUserId' | 'createdAt'>,
+  recordData: TitheFormValues,
   userId: string,
-  userEmail: string
+  userEmail: string,
+  memberName: string,
 ): Promise<string> => {
   if (!userId) {
     throw new Error('User ID was not provided to addTitheRecord service.');
@@ -49,31 +52,48 @@ export const addTitheRecord = async (
     await logActivity(userId, userEmail, "CREATE_TITHE_RECORD", {
       recordId: docRef.id,
       collectionName: TITHES_COLLECTION,
-      extraInfo: `Member: ${recordData.memberName}, Amount: ${recordData.amount}`
+      extraInfo: `Member: ${memberName}, Amount: ${recordData.amount}`
     });
     return docRef.id;
   } catch (error) {
     console.error('Error adding tithe record: ', error);
-    throw error;
+    throw new Error('Failed to save tithe record.');
   }
 };
 
-export const getTitheRecords = async (): Promise<TitheRecord[]> => {
-  const q = query(collection(db, TITHES_COLLECTION), orderBy('date', 'desc'));
+export const getTitheRecordsForMember = async (memberId: string): Promise<TitheRecord[]> => {
+  const q = query(
+    collection(db, TITHES_COLLECTION), 
+    where('memberId', '==', memberId), 
+    orderBy('date', 'desc')
+  );
   try {
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => fromFirestore(doc.data(), doc.id));
   } catch (error) {
-    console.error('Error fetching tithe records: ', error);
-    throw error;
+    console.error(`Error fetching tithe records for member ${memberId}:`, error);
+    throw new Error('Failed to fetch tithe records.');
   }
 };
 
+
+export const getTitheTotalForMember = async (memberId: string): Promise<number> => {
+    const q = query(collection(db, TITHES_COLLECTION), where('memberId', '==', memberId));
+    try {
+        const querySnapshot = await getDocs(q);
+        const total = querySnapshot.docs.reduce((sum, doc) => sum + doc.data().amount, 0);
+        return total;
+    } catch (error) {
+        console.error(`Error calculating tithe total for member ${memberId}:`, error);
+        return 0; // Return 0 on error
+    }
+}
+
 export const updateTitheRecord = async (
   recordId: string,
-  dataToUpdate: Partial<TitheFormValues>,
+  dataToUpdate: Partial<Omit<TitheFormValues, 'memberId'>>,
   userId: string,
-  userEmail: string
+  userEmail: string,
 ): Promise<void> => {
   if (!userId) {
     throw new Error('User ID was not provided to updateTitheRecord service.');
@@ -89,11 +109,11 @@ export const updateTitheRecord = async (
     await logActivity(userId, userEmail, "UPDATE_TITHE_RECORD", {
       recordId: recordId,
       collectionName: TITHES_COLLECTION,
-      extraInfo: `Updated tithe for record.` // Member name is not in dataToUpdate directly
+      extraInfo: `Updated tithe record.`
     });
   } catch (error) {
     console.error('Error updating tithe record: ', error);
-    throw error;
+    throw new Error('Failed to update tithe record.');
   }
 };
 
@@ -113,6 +133,6 @@ export const deleteTitheRecord = async (
     });
   } catch (error) {
     console.error('Error deleting tithe record: ', error);
-    throw error;
+    throw new Error('Failed to delete tithe record.');
   }
 };

@@ -4,9 +4,9 @@ import { z } from 'zod';
 
 // For TithesPage form
 export const titheSchema = z.object({
-  memberName: z.string().min(2, { message: "Member name must be at least 2 characters." }),
   date: z.date({ required_error: "Date is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
+  memberId: z.string().min(1, "A member must be selected."),
 });
 export type TitheFormValues = z.infer<typeof titheSchema>;
 
@@ -61,7 +61,7 @@ export interface IncomeRecord {
 
 export interface TitheRecord {
   id:string;
-  memberName: string;
+  memberId: string;
   date: Date; // JavaScript Date object
   amount: number;
   recordedByUserId?: string;
@@ -71,12 +71,32 @@ export interface TitheRecord {
 // For data stored in Firestore, assuming we'll convert to TitheRecord on client
 export interface TitheRecordFirestore {
   id:string;
-  memberName: string;
+  memberId: string;
   date: Timestamp;
   amount: number;
   recordedByUserId: string;
   createdAt: Timestamp;
 }
+
+// Member Management
+export const memberSchema = z.object({
+  fullName: z.string().min(2, "Full name must be at least 2 characters."),
+});
+export type MemberFormValues = z.infer<typeof memberSchema>;
+
+export interface Member {
+  id: string;
+  fullName: string;
+  createdAt: Date;
+  recordedByUserId: string;
+}
+
+export interface MemberFirestore {
+  fullName: string;
+  createdAt: Timestamp;
+  recordedByUserId: string;
+}
+
 
 // Expense Management Types
 export type ExpenseCategory =
@@ -186,7 +206,10 @@ export type ActivityLogAction =
   | "CREATE_ACCOUNT"
   | "UPDATE_ACCOUNT"
   | "DELETE_ACCOUNT"
-  | "SET_BUDGET";
+  | "SET_BUDGET"
+  | "CREATE_MEMBER"
+  | "UPDATE_MEMBER"
+  | "DELETE_MEMBER";
 
 export interface ActivityLogRecord {
   id: string;

@@ -1,479 +1,268 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, UserCheck, PlusCircle, Trash2, Edit, Loader2, AlertTriangle, Search } from "lucide-react";
-import { format } from "date-fns";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import type { TitheRecord } from '@/types';
-import { titheSchema, type TitheFormValues } from '@/types';
-import { addTitheRecord, getTitheRecords, updateTitheRecord, deleteTitheRecord } from '@/services/titheService';
-import { auth } from '@/lib/firebase';
+import { UserPlus, PlusCircle, Edit, Trash2, Loader2, AlertTriangle, Users, Search } from "lucide-react";
+import { auth, db } from '@/lib/firebase';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { collection, query, orderBy, Timestamp, where } from 'firebase/firestore';
+import { addMember, updateMember, deleteMember } from '@/services/memberService';
+import { getTitheTotalForMember } from '@/services/titheService';
+import type { Member, MemberFirestore, TitheRecord, TitheRecordFirestore } from '@/types';
+import { memberSchema, type MemberFormValues } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import type { User } from 'firebase/auth';
 
-interface EditTitheDialogProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  record: TitheRecord | null;
-  onSave: (updatedData: TitheFormValues, recordId: string) => Promise<void>;
-  currentUser: User | null;
-}
-
-const EditTitheDialog: React.FC<EditTitheDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser }) => {
-  const [isSaving, setIsSaving] = useState(false);
-  const { toast } = useToast();
-  const editForm = useForm<TitheFormValues>({
-    resolver: zodResolver(titheSchema),
-  });
-
-  React.useEffect(() => {
-    if (record && isOpen) {
-      editForm.reset({
-        memberName: record.memberName,
-        date: record.date,
-        amount: record.amount,
-      });
-    } else if (!isOpen) {
-        editForm.reset({ memberName: "", date: new Date(), amount: 0 });
-    }
-  }, [record, editForm, isOpen]);
-
-  const handleEditSubmit = async (data: TitheFormValues) => {
-    if (!record) return;
-    if (!currentUser || !currentUser.uid) {
-      toast({ variant: "destructive", title: "Authentication Error", description: "You must be logged in to save changes." });
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await onSave(data, record.id);
-      onOpenChange(false);
-    } catch (error) {
-      // Error toast is handled by onSave caller
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!record) return null;
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>Edit Tithe for {record.memberName}</DialogTitle>
-          <DialogDescription>
-            Update the date or amount for this tithe record. Click save when you're done.
-          </DialogDescription>
-        </DialogHeader>
-        <Form {...editForm}>
-          <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-6 py-4">
-            <FormField
-              control={editForm.control}
-              name="memberName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Member Name (Read-only)</FormLabel>
-                  <FormControl>
-                    <Input {...field} readOnly className="bg-muted/50 cursor-not-allowed" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <div className="grid grid-cols-1 gap-6">
-              <FormField
-                control={editForm.control}
-                name="date"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Date of Tithe</FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                            disabled={isSaving}
-                          >
-                            {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={editForm.control}
-                name="amount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Amount (XAF)</FormLabel>
-                    <FormControl>
-                      <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={isSaving} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <DialogFooter>
-               <DialogClose asChild>
-                 <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
-              </DialogClose>
-              <Button type="submit" disabled={isSaving || !currentUser}>
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Save Changes
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
-  );
+const memberConverter = {
+    fromFirestore: (snapshot: any): Member => {
+        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        };
+    },
+    toFirestore: (member: Member) => member,
 };
 
-
-export default function TithesPage() {
-  const [titheRecords, setTitheRecords] = useState<TitheRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingRecord, setEditingRecord] = useState<TitheRecord | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const { toast } = useToast();
-  const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser); // Keep this for UI checks
-
-  const form = useForm<TitheFormValues>({
-    resolver: zodResolver(titheSchema),
-    defaultValues: {
-      memberName: "",
-      date: new Date(),
-      amount: 0,
+const titheConverter = {
+    fromFirestore: (snapshot: any): TitheRecord => {
+        const data = snapshot.data() as Omit<TitheRecordFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            date: (data.date as Timestamp).toDate(),
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        };
     },
-  });
+    toFirestore: (tithe: TitheRecord) => tithe,
+}
 
-  const fetchRecords = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const records = await getTitheRecords();
-      setTitheRecords(records.sort((a,b) => b.date.getTime() - a.date.getTime()));
-    } catch (err) {
-      console.error(err);
-      setError("Failed to fetch tithe records.");
-      toast({ variant: "destructive", title: "Error", description: "Could not fetch tithe records." });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast]);
+export default function MembersPage() {
+    const { toast } = useToast();
+    const [authUser, authLoading] = useAuthState(auth);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
+    const [memberTithes, setMemberTithes] = useState<Record<string, number>>({});
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
-      if (user) {
-        fetchRecords();
-      } else {
-        setTitheRecords([]);
-        setIsLoading(false);
-        setError("Please log in to manage tithe records.");
+    const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
+    const [members, loadingMembers, errorMembers] = useCollectionData(membersQuery);
+    
+    const tithesQuery = useMemo(() => authUser ? collection(db, 'tithe_records').withConverter(titheConverter) : null, [authUser]);
+    const [titheRecords, loadingTithes] = useCollectionData(tithesQuery);
+
+    React.useEffect(() => {
+      if (members && titheRecords) {
+        const totals: Record<string, number> = {};
+        members.forEach(member => {
+            const memberTotal = titheRecords
+                .filter(tithe => tithe.memberId === member.id)
+                .reduce((sum, tithe) => sum + tithe.amount, 0);
+            totals[member.id] = memberTotal;
+        });
+        setMemberTithes(totals);
       }
+    }, [members, titheRecords])
+
+
+    const addForm = useForm<MemberFormValues>({
+        resolver: zodResolver(memberSchema),
+        defaultValues: { fullName: "" },
     });
-    return () => unsubscribe();
-  }, [fetchRecords]);
 
-  const formatCurrency = (value: number) => {
-    return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
-  };
+    const editForm = useForm<MemberFormValues>({ resolver: zodResolver(memberSchema) });
 
-  const onSubmit = async (data: TitheFormValues) => {
-    if (!currentUser?.uid || !currentUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to add a tithe." });
-      return;
-    }
-    try {
-      await addTitheRecord(data, currentUser.uid, currentUser.email);
-      await fetchRecords();
-      form.reset({ memberName: "", date: new Date(), amount: 0 });
-      toast({ title: "Tithe Saved", description: `Tithe for ${data.memberName} has been successfully saved.` });
-    } catch (err) {
-      console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to save tithe record." });
-    }
-  };
+    const filteredMembers = useMemo(() => {
+        if (!members) return [];
+        if (!searchTerm) return members;
+        return members.filter(member => member.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
+    }, [members, searchTerm]);
 
-  const handleDeleteRecord = async (id: string, memberName: string, recordDate: Date) => {
-    if (!currentUser?.uid || !currentUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete a tithe." });
-      return;
-    }
-    try {
-      await deleteTitheRecord(id, currentUser.uid, currentUser.email);
-      await fetchRecords();
-      toast({
-          title: "Tithe Deleted",
-          description: `Tithe record for ${memberName} on ${format(recordDate, "PP")} has been deleted.`,
-          variant: "default"
-      });
-    } catch (err) {
-      console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to delete tithe record." });
-    }
-  };
-
-  const handleOpenEditDialog = (record: TitheRecord) => {
-    setEditingRecord(record);
-    setIsEditDialogOpen(true);
-  };
-
-  const handleSaveEditedTithe = async (updatedData: TitheFormValues, recordId: string) => {
-    if (!currentUser?.uid || !currentUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update a tithe." });
-      throw new Error("User not authenticated");
-    }
-    try {
-      const { memberName, ...dataToUpdateForService } = updatedData;
-      await updateTitheRecord(recordId, dataToUpdateForService, currentUser.uid, currentUser.email);
-      await fetchRecords();
-      toast({ title: "Tithe Updated", description: `Tithe for ${updatedData.memberName} has been updated.`});
-      setEditingRecord(null);
-    } catch (err) {
-        console.error(err);
-        toast({ variant: "destructive", title: "Error", description: "Failed to update tithe record." });
-        throw err;
-    }
-  };
-
-  const filteredTithes = useMemo(() => {
-    const groups: { [key: string]: TitheRecord[] } = {};
-    titheRecords.forEach(record => {
-      if (searchTerm === "" || record.memberName.toLowerCase().includes(searchTerm.toLowerCase())) {
-        if (!groups[record.memberName]) {
-          groups[record.memberName] = [];
+    const handleAddMember = async (data: MemberFormValues) => {
+        if (!authUser) return;
+        setIsSubmitting(true);
+        try {
+            await addMember(data, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Member added successfully." });
+            addForm.reset({ fullName: "" });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to add member." });
+        } finally {
+            setIsSubmitting(false);
         }
-        groups[record.memberName].push(record);
-      }
-    });
+    };
 
-    return Object.keys(groups)
-      .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
-      .reduce((acc, memberName) => {
-        acc[memberName] = groups[memberName].sort((a, b) => b.date.getTime() - a.date.getTime());
-        return acc;
-      }, {} as { [key: string]: TitheRecord[] });
-  }, [titheRecords, searchTerm]);
+    const handleUpdateMember = async (data: MemberFormValues) => {
+        if (!authUser || !selectedMember) return;
+        setIsSubmitting(true);
+        try {
+            await updateMember(selectedMember.id, data, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Member updated successfully." });
+            setIsEditDialogOpen(false);
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to update member." });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    const handleDeleteMember = async (memberId: string) => {
+        if (!authUser) return;
+        // Check if member has associated tithes
+        const hasTithes = titheRecords?.some(t => t.memberId === memberId);
+        if (hasTithes) {
+            toast({
+                variant: "destructive",
+                title: "Deletion Blocked",
+                description: "Cannot delete a member with existing tithe records. Please remove their tithes first.",
+            });
+            return;
+        }
+        try {
+            await deleteMember(memberId, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Member deleted successfully." });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to delete member." });
+        }
+    }
 
-  return (
-    <div className="space-y-6 md:space-y-8">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground">Manage Tithes</h1>
+    const openEditDialog = (member: Member) => {
+        setSelectedMember(member);
+        editForm.reset(member);
+        setIsEditDialogOpen(true);
+    };
 
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle>Add New Tithe</CardTitle>
-          <CardDescription>Enter tithe details for a church member.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {!currentUser && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Authentication Required</AlertTitle>
-              <AlertDescription>Please log in to add or view tithe records.</AlertDescription>
-            </Alert>
-          )}
-          {currentUser && (
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <FormField
-                  control={form.control}
-                  name="memberName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Member Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter member's full name" {...field} disabled={form.formState.isSubmitting}/>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="grid md:grid-cols-2 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="date"
-                    render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel>Date of Tithe</FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant={"outline"}
-                                className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                                disabled={form.formState.isSubmitting}
-                              >
-                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                              initialFocus
+    const formatCurrency = (value: number) => {
+        return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
+    };
+
+    const isLoading = authLoading || loadingMembers || loadingTithes;
+
+    if (isLoading && !members) {
+        return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
+    }
+    
+    if (!authUser) {
+         return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Authenticated</AlertTitle><AlertDescription>Please log in to manage members and tithes.</AlertDescription></Alert>;
+    }
+
+    return (
+        <div className="space-y-6 md:space-y-8">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+                <Users className="mr-3 h-8 w-8 text-primary" />
+                Manage Members & Tithes
+            </h1>
+
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle>Add New Member</CardTitle>
+                    <CardDescription>Add a new member to the church records.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Form {...addForm}>
+                        <form onSubmit={addForm.handleSubmit(handleAddMember)} className="flex items-end gap-4">
+                            <FormField control={addForm.control} name="fullName" render={({ field }) => (
+                                <FormItem className="flex-grow"><FormLabel>Member's Full Name</FormLabel><FormControl><Input placeholder="e.g., John Doe" {...field} /></FormControl><FormMessage /></FormItem>
+                            )} />
+                            <Button type="submit" disabled={isSubmitting}>
+                                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                                Add Member
+                            </Button>
+                        </form>
+                    </Form>
+                </CardContent>
+            </Card>
+
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle>Church Members</CardTitle>
+                    <div className="flex justify-between items-center">
+                        <CardDescription>View members, their total contributions, and manage their records.</CardDescription>
+                         <div className="relative">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                type="search"
+                                placeholder="Search by name..."
+                                className="pl-8 w-full md:w-[300px]"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
                             />
-                          </PopoverContent>
-                        </Popover>
-                        <FormMessage />
-                      </FormItem>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {errorMembers && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{errorMembers.message}</AlertDescription></Alert>}
+                    {!errorMembers && filteredMembers.length > 0 && (
+                         <div className="overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Member Name</TableHead>
+                                        <TableHead>Total Tithe Contribution</TableHead>
+                                        <TableHead className="text-right">Actions</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {filteredMembers.map(member => (
+                                        <TableRow key={member.id}>
+                                            <TableCell>
+                                                <Link href={`/tithes/${member.id}`} className="hover:underline text-primary font-medium">
+                                                    {member.fullName}
+                                                </Link>
+                                            </TableCell>
+                                            <TableCell>{formatCurrency(memberTithes[member.id] || 0)}</TableCell>
+                                            <TableCell className="text-right space-x-1">
+                                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(member)} aria-label="Edit Member"><Edit className="h-4 w-4" /></Button>
+                                                <Button variant="ghost" size="icon" onClick={() => handleDeleteMember(member.id)} aria-label="Delete Member"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))}
+                                </TableBody>
+                            </Table>
+                        </div>
                     )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="amount"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Amount (XAF)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
+                    {!errorMembers && filteredMembers.length === 0 && (
+                        <p className="text-center text-muted-foreground py-10">
+                            {searchTerm ? `No members found matching "${searchTerm}".` : "No members added yet."}
+                        </p>
                     )}
-                  />
-                </div>
-                <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !currentUser}>
-                  {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserCheck className="mr-2 h-4 w-4" />}
-                   Save Tithe
-                </Button>
-              </form>
-            </Form>
-          )}
-        </CardContent>
-      </Card>
+                </CardContent>
+            </Card>
 
-      <Card className="shadow-lg">
-        <CardHeader>
-          <CardTitle>Member Tithe Records</CardTitle>
-           <CardDescription>View and manage tithes grouped by member. Use the search bar to filter by name.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="search"
-                placeholder="Search by member name..."
-                className="pl-8 w-full md:w-1/2 lg:w-1/3"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                disabled={!currentUser || isLoading}
-              />
-            </div>
-          </div>
-          {isLoading && (
-            <div className="flex justify-center items-center py-10">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="ml-2">Loading records...</p>
-            </div>
-          )}
-          {!isLoading && error && (
-             <Alert variant="destructive">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {!isLoading && !error && !currentUser && (
-             <p className="text-center text-muted-foreground py-10">Please log in to view tithe records.</p>
-          )}
-          {!isLoading && !error && currentUser && Object.keys(filteredTithes).length === 0 && (
-            <p className="text-center text-muted-foreground py-10">
-              {searchTerm ? `No members found matching "${searchTerm}".` : "No tithe records yet. Add a new tithe above."}
-            </p>
-          )}
-          {!isLoading && !error && currentUser && Object.keys(filteredTithes).length > 0 && (
-            <Accordion type="multiple" className="w-full" defaultValue={Object.keys(filteredTithes).length > 0 ? [Object.keys(filteredTithes)[0]] : []}>
-              {Object.entries(filteredTithes).map(([memberName, records]) => {
-                const totalTithe = records.reduce((sum, r) => sum + r.amount, 0);
-                return (
-                  <AccordionItem value={memberName} key={memberName}>
-                    <AccordionTrigger>
-                      <div className="flex justify-between w-full pr-2">
-                        <span>{memberName}</span>
-                        <span className="text-sm text-muted-foreground">
-                          {records.length} contribution(s) - Total: {formatCurrency(totalTithe)}
-                        </span>
-                      </div>
-                    </AccordionTrigger>
-                    <AccordionContent>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Amount</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {records.map((record) => (
-                            <TableRow key={record.id}>
-                              <TableCell>{format(record.date, "PP")}</TableCell>
-                              <TableCell>{formatCurrency(record.amount)}</TableCell>
-                              <TableCell className="text-right space-x-1">
-                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} aria-label="Edit tithe" disabled={!currentUser}>
-                                  <Edit className="h-4 w-4" />
+            {/* Edit Member Dialog */}
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Member</DialogTitle>
+                        <DialogDescription>Update the name for "{selectedMember?.fullName}".</DialogDescription>
+                    </DialogHeader>
+                    <Form {...editForm}>
+                        <form onSubmit={editForm.handleSubmit(handleUpdateMember)} className="space-y-4 py-4">
+                             <FormField control={editForm.control} name="fullName" render={({ field }) => (
+                                <FormItem><FormLabel>Member Full Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                            )} />
+                             <DialogFooter>
+                                <DialogClose asChild><Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button></DialogClose>
+                                <Button type="submit" disabled={isSubmitting}>
+                                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Save Changes
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record.id, record.memberName, record.date)} aria-label="Delete tithe" disabled={!currentUser}>
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </AccordionContent>
-                  </AccordionItem>
-                );
-              })}
-            </Accordion>
-          )}
-        </CardContent>
-      </Card>
-
-      <EditTitheDialog
-        isOpen={isEditDialogOpen}
-        onOpenChange={setIsEditDialogOpen}
-        record={editingRecord}
-        onSave={handleSaveEditedTithe}
-        currentUser={currentUser}
-      />
-    </div>
-  );
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
 }
