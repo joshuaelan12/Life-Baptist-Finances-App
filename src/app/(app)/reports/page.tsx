@@ -18,7 +18,7 @@ import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
-import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore } from '@/types';
+import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
@@ -74,6 +74,18 @@ const expenseConverter = {
   }
 };
 
+const accountConverter = {
+    fromFirestore: (snapshot: any, options: any): Account => {
+        const data = snapshot.data(options) as Omit<AccountFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as Account;
+    },
+    toFirestore: (account: Account) => account,
+};
+
 
 export default function ReportsPage() {
   const { toast } = useToast();
@@ -90,6 +102,12 @@ export default function ReportsPage() {
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
   const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
+  const [accounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
+  
+  const accountsMap = useMemo(() => {
+    if (!accounts) return new Map<string, Account>();
+    return new Map(accounts.map(acc => [acc.id, acc]));
+  }, [accounts]);
 
   const filteredTitheRecords = useMemo(() => {
     if (!titheMemberSearch || !titheRecords) return [];
@@ -126,15 +144,15 @@ export default function ReportsPage() {
       switch (reportType) {
         case 'income':
           reportTitle = `Income Report ${periodString}`;
-          rawData = (incomeRecords || []).filter(r => 
-            !startDate || (r.date >= startDate && r.date <= endDate!)
-          );
+          rawData = (incomeRecords || [])
+            .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
+            .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
           break;
         case 'expenses':
           reportTitle = `Expense Report ${periodString}`;
-          rawData = (expenseRecords || []).filter(r => 
-            !startDate || (r.date >= startDate && r.date <= endDate!)
-          );
+          rawData = (expenseRecords || [])
+            .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
+            .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
           break;
         case 'tithes':
           reportTitle = `Tithe Report ${periodString}`;
@@ -162,7 +180,7 @@ export default function ReportsPage() {
       
       // Sanitize data for export: remove id and recordedByUserId
       const finalData = rawData.map(record => {
-          const { id, recordedByUserId, createdAt, ...rest } = record;
+          const { id, recordedByUserId, createdAt, accountId, ...rest } = record;
           return rest;
       });
 
@@ -373,6 +391,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
-    
-    
