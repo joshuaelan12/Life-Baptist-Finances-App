@@ -5,25 +5,25 @@ import React, { useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search, User } from "lucide-react";
-import { format, startOfMonth, endOfMonth } from "date-fns";
+import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search } from "lucide-react";
+import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
+import { DateRange } from "react-day-picker";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, where } from 'firebase/firestore';
 import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
-type ReportType = "income" | "expenses" | "tithes" | "summary";
-type PeriodType = "all" | "monthly";
+type ReportType = "income" | "expenses" | "tithes" | "summary" | "budget_vs_actuals" | "balance_sheet";
+type PeriodType = "all" | "monthly" | "custom";
 
 // We keep the converters here to ensure the useCollectionData hooks work as expected for data display/preview
 const incomeConverter = {
@@ -94,6 +94,9 @@ export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>("summary");
   const [periodType, setPeriodType] = useState<PeriodType>("monthly");
   const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
+  const [selectedDateRange, setSelectedDateRange] = useState<DateRange | undefined>({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) });
+  const [budgetYear, setBudgetYear] = useState(new Date().getFullYear());
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
@@ -102,7 +105,7 @@ export default function ReportsPage() {
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
   const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
-  const [accounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
+  const [accounts, loadingAccounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
   
   const accountsMap = useMemo(() => {
     if (!accounts) return new Map<string, Account>();
@@ -133,13 +136,25 @@ export default function ReportsPage() {
     setIsGenerating(true);
     setGenerationError(null);
     
-    const startDate = periodType === 'monthly' ? startOfMonth(selectedMonth) : undefined;
-    const endDate = periodType === 'monthly' ? endOfMonth(selectedMonth) : undefined;
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+    let periodString = "";
+
+    if (periodType === 'monthly') {
+      startDate = startOfMonth(selectedMonth);
+      endDate = endOfMonth(selectedMonth);
+      periodString = `for ${format(selectedMonth, "MMMM yyyy")}`;
+    } else if (periodType === 'custom' && selectedDateRange?.from) {
+      startDate = selectedDateRange.from;
+      endDate = selectedDateRange.to ?? selectedDateRange.from;
+      periodString = `from ${format(startDate, "PPP")} to ${format(endDate, "PPP")}`;
+    } else {
+      periodString = "for All Time";
+    }
 
     try {
       let rawData: any[] = [];
       let reportTitle = "";
-      const periodString = periodType === 'monthly' ? `for ${format(selectedMonth, "MMMM yyyy")}` : 'for All Time';
 
       switch (reportType) {
         case 'income':
@@ -176,9 +191,33 @@ export default function ReportsPage() {
              { Category: 'Net Balance', Amount: totalOfferingsAndDonations + totalTithes - totalExpenses },
            ];
           break;
+        case 'budget_vs_actuals':
+        case 'balance_sheet':
+          reportTitle = reportType === 'balance_sheet' ? `Balance Sheet as of ${format(endDate || new Date(), "PPP")}` : `Budget vs. Actuals ${periodString}`;
+          const realizedAmounts: Record<string, number> = {};
+          
+          (incomeRecords || [])
+            .filter(r => r.accountId && startDate && endDate && r.date >= startDate && r.date <= endDate)
+            .forEach(r => {
+                realizedAmounts[r.accountId!] = (realizedAmounts[r.accountId!] || 0) + r.amount;
+            });
+          
+          (expenseRecords || [])
+            .filter(r => r.accountId && startDate && endDate && r.date >= startDate && r.date <= endDate)
+            .forEach(r => {
+                realizedAmounts[r.accountId!] = (realizedAmounts[r.accountId!] || 0) + r.amount;
+            });
+
+          rawData = (accounts || []).map(acc => ({
+            'A/C#': acc.code,
+            'A/C NAME': acc.name,
+            'Type': acc.type,
+            'Budget': acc.budgets?.[budgetYear] || 0,
+            'Realized': realizedAmounts[acc.id] || 0,
+          }));
+          break;
       }
       
-      // Sanitize data for export: remove id and recordedByUserId
       const finalData = rawData.map(record => {
           const { id, recordedByUserId, createdAt, accountId, ...rest } = record;
           return rest;
@@ -192,7 +231,7 @@ export default function ReportsPage() {
       if (formatType === 'csv') {
         downloadCsv(finalData, reportTitle);
       } else {
-        downloadPdf(finalData, reportTitle, reportType);
+        downloadPdf(finalData, reportTitle, reportType, { budgetYear, periodString });
       }
 
       toast({ title: "Success", description: `Report has been prepared for download.` });
@@ -218,8 +257,10 @@ export default function ReportsPage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
   };
 
+  const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
-  if (authLoading) {
+
+  if (authLoading || loadingAccounts) {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
   if (authError) {
@@ -228,6 +269,8 @@ export default function ReportsPage() {
   if (!authUser) {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Authenticated</AlertTitle><AlertDescription>Please log in to generate reports.</AlertDescription></Alert>;
   }
+
+  const showPeriodSelector = reportType !== 'balance_sheet';
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -256,48 +299,110 @@ export default function ReportsPage() {
                   <SelectItem value="income">Income Report</SelectItem>
                   <SelectItem value="expenses">Expense Report</SelectItem>
                   <SelectItem value="tithes">Tithe Report</SelectItem>
+                  <SelectItem value="budget_vs_actuals">Budget vs Actuals</SelectItem>
+                  <SelectItem value="balance_sheet">Balance Sheet</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>2. Select Period</Label>
-              <RadioGroup value={periodType} onValueChange={(v) => setPeriodType(v as PeriodType)} className="flex items-center space-x-4" disabled={isGenerating}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="monthly" id="monthly" />
-                  <Label htmlFor="monthly">Monthly</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="all" id="all" />
-                  <Label htmlFor="all">All-Time</Label>
-                </div>
-              </RadioGroup>
-            </div>
+            {showPeriodSelector && (
+              <div className="space-y-2">
+                <Label>2. Select Period</Label>
+                <Select value={periodType} onValueChange={(v) => setPeriodType(v as PeriodType)} disabled={isGenerating}>
+                   <SelectTrigger>
+                      <SelectValue placeholder="Choose a period..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                      <SelectItem value="all">All Time</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           
-          {periodType === 'monthly' && (
-            <div className="space-y-2">
-              <Label>3. Select Month</Label>
-               <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full sm:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(selectedMonth, "MMMM yyyy")}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
-                    <Calendar
-                      mode="single"
-                      selected={selectedMonth}
-                      onSelect={(d) => d && setSelectedMonth(d)}
-                      initialFocus
-                      captionLayout="dropdown-buttons"
-                      fromYear={2020}
-                      toYear={new Date().getFullYear()}
-                    />
-                  </PopoverContent>
-                </Popover>
-            </div>
-          )}
+          <div className="grid md:grid-cols-2 gap-6">
+            {periodType === 'monthly' && showPeriodSelector && (
+              <div className="space-y-2">
+                <Label>3. Select Month</Label>
+                 <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full sm:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {format(selectedMonth, "MMMM yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={selectedMonth}
+                        onSelect={(d) => d && setSelectedMonth(d)}
+                        initialFocus
+                        captionLayout="dropdown-buttons"
+                        fromYear={2020}
+                        toYear={new Date().getFullYear()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+              </div>
+            )}
+            {(periodType === 'custom' || reportType === 'balance_sheet') && (
+              <div className="space-y-2">
+                  <Label>{reportType === 'balance_sheet' ? 'Select Date' : '3. Select Date Range'}</Label>
+                  <Popover>
+                      <PopoverTrigger asChild>
+                      <Button
+                          id="date"
+                          variant={"outline"}
+                          className={("w-full sm:w-[300px] justify-start text-left font-normal")}
+                          disabled={isGenerating}
+                      >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {reportType === 'balance_sheet' ? (
+                            selectedDateRange?.to ? format(selectedDateRange.to, "LLL dd, y") : <span>Pick a date</span>
+                          ) : (
+                            selectedDateRange?.from ? (
+                                selectedDateRange.to ? (
+                                <>
+                                    {format(selectedDateRange.from, "LLL dd, y")} - {format(selectedDateRange.to, "LLL dd, y")}
+                                </>
+                                ) : (
+                                format(selectedDateRange.from, "LLL dd, y")
+                                )
+                            ) : (
+                                <span>Pick a date range</span>
+                            )
+                          )}
+                      </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                          initialFocus
+                          mode={reportType === 'balance_sheet' ? 'single' : 'range'}
+                          defaultMonth={reportType === 'balance_sheet' ? selectedDateRange?.to : selectedDateRange?.from}
+                          selected={reportType === 'balance_sheet' ? selectedDateRange?.to : selectedDateRange}
+                          onSelect={reportType === 'balance_sheet' ? (date) => setSelectedDateRange({from: date, to: date}) : setSelectedDateRange}
+                          numberOfMonths={reportType === 'balance_sheet' ? 1 : 2}
+                      />
+                      </PopoverContent>
+                  </Popover>
+              </div>
+            )}
+
+            {(reportType === 'budget_vs_actuals') && (
+               <div className="space-y-2">
+                 <Label>Select Budget Year</Label>
+                 <Select value={String(budgetYear)} onValueChange={(v) => setBudgetYear(Number(v))} disabled={isGenerating}>
+                    <SelectTrigger className="w-full sm:w-[280px]">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {yearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}
+                    </SelectContent>
+                 </Select>
+               </div>
+            )}
+          </div>
 
           {generationError && (
              <Alert variant="destructive">
@@ -391,3 +496,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
