@@ -62,6 +62,7 @@ export interface IncomeRecord {
 export interface TitheRecord {
   id:string;
   memberId: string;
+  memberName: string;
   date: Date; // JavaScript Date object
   amount: number;
   recordedByUserId?: string;
@@ -72,6 +73,7 @@ export interface TitheRecord {
 export interface TitheRecordFirestore {
   id:string;
   memberId: string;
+  memberName: string;
   date: Timestamp;
   amount: number;
   recordedByUserId: string;
@@ -279,3 +281,5 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
+
+    

@@ -44,6 +44,7 @@ export const addTitheRecord = async (
   try {
     const docRef = await addDoc(collection(db, TITHES_COLLECTION), {
       ...recordData,
+      memberName, // Add memberName to the record
       date: Timestamp.fromDate(recordData.date),
       recordedByUserId: userId,
       createdAt: serverTimestamp(),
@@ -136,3 +137,5 @@ export const deleteTitheRecord = async (
     throw new Error('Failed to delete tithe record.');
   }
 };
+
+    

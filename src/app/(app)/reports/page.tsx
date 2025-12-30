@@ -32,6 +32,7 @@ const incomeConverter = {
     const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
+      code: data.code,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
       category: data.category,
       amount: data.amount,
@@ -48,7 +49,9 @@ const titheConverter = {
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): TitheRecord {
     const data = snapshot.data(options) as Omit<TitheRecordFirestore, 'id'>;
     return {
-      id: snapshot.id, memberName: data.memberName,
+      id: snapshot.id,
+      memberId: data.memberId,
+      memberName: data.memberName,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
       amount: data.amount, recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
@@ -61,6 +64,7 @@ const expenseConverter = {
     const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
+      code: data.code,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
       category: data.category, amount: data.amount, description: data.description,
       payee: data.payee, paymentMethod: data.paymentMethod, recordedByUserId: data.recordedByUserId,
@@ -88,14 +92,15 @@ export default function ReportsPage() {
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
 
   const filteredTitheRecords = useMemo(() => {
-    if (!titheMemberSearch) return [];
-    return (titheRecords || []).filter(r => 
-      r.memberName.toLowerCase().includes(titheMemberSearch.toLowerCase())
+    if (!titheMemberSearch || !titheRecords) return [];
+    return titheRecords.filter(r => 
+      r.memberName && r.memberName.toLowerCase().includes(titheMemberSearch.toLowerCase())
     ).sort((a,b) => a.date.getTime() - b.date.getTime());
   }, [titheRecords, titheMemberSearch]);
 
   const uniqueMemberNames = useMemo(() => {
-    const names = new Set((titheRecords || []).map(r => r.memberName));
+    if (!titheRecords) return [];
+    const names = new Set(titheRecords.map(r => r.memberName).filter(Boolean) as string[]);
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [titheRecords]);
   
@@ -369,4 +374,5 @@ export default function ReportsPage() {
   );
 }
 
+    
     
