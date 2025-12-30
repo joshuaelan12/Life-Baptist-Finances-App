@@ -67,16 +67,6 @@ const memberConverter = {
     toFirestore: (member: Member) => member,
 };
 
-// Simplified schema for the tithe form part
-const titheOnlySchema = incomeSourceSchema.pick({
-    code: true,
-    transactionName: true,
-    amount: true,
-    accountId: true,
-    memberName: true,
-    description: true,
-});
-
 interface EditIncomeSourceDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -444,3 +434,5 @@ export default function IncomePage() {
     </div>
   );
 }
+
+    
