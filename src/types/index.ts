@@ -142,48 +142,89 @@ export const expenseCategories: ExpenseCategory[] = [
   "Other"
 ];
 
-// For Expense Page Form validation
-export const expenseSchema = z.object({
-  code: z.string().min(1, { message: "Transaction code is required." }),
-  date: z.date({ required_error: "Date is required." }),
+// Schema for creating budgeted expense sources
+export const expenseSourceSchema = z.object({
+  code: z.string().min(1, { message: "Code is required." }),
+  expenseName: z.string().min(1, { message: "Expense name is required." }),
   category: z.enum(expenseCategories as [ExpenseCategory, ...ExpenseCategory[]], { required_error: "Category is required." }),
-  amount: z.coerce.number().positive({ message: "Amount must be positive." }),
+  accountId: z.string().min(1, { message: "Account is required." }),
+  budget: z.coerce.number().positive({ message: "Budget must be a positive number." }),
   description: z.string().optional(),
+});
+export type ExpenseSourceFormValues = z.infer<typeof expenseSourceSchema>;
+
+
+// For data stored in Firestore (Expense Source)
+export interface ExpenseSourceFirestore {
+  id: string;
+  code: string;
+  expenseName: string;
+  category: ExpenseCategory;
+  accountId?: string;
+  description?: string;
+  budget?: number;
+  recordedByUserId: string;
+  createdAt: Timestamp;
+}
+
+// For client-side display (Expense Source)
+export interface ExpenseSource {
+  id: string;
+  code: string;
+  expenseName: string;
+  category: ExpenseCategory;
+  accountId?: string;
+  description?: string;
+  budget?: number;
+  createdAt?: Date;
+  recordedByUserId?: string;
+}
+
+// For Expense transaction validation
+export const expenseRecordSchema = z.object({
+  code: z.string().min(1, { message: "Transaction code is required." }),
+  expenseName: z.string().min(1, "Transaction name is required."),
+  date: z.date({ required_error: "Date is required." }),
+  amount: z.coerce.number().positive({ message: "Amount must be positive." }),
   payee: z.string().optional(),
   paymentMethod: z.string().optional(),
-  accountId: z.string().min(1, { message: "Account is required." }),
+  description: z.string().optional(),
 });
+export type ExpenseRecordFormValues = z.infer<typeof expenseRecordSchema>;
 
-export type ExpenseFormValues = z.infer<typeof expenseSchema>;
 
-// For data stored in Firestore
+// For individual expense transactions in Firestore
 export interface ExpenseRecordFirestore {
   id: string;
   code: string;
+  expenseName: string;
   date: Timestamp;
-  category: ExpenseCategory;
+  category: ExpenseCategory; // Inherited from source
   amount: number;
-  description?: string;
   payee?: string;
   paymentMethod?: string;
+  description?: string;
   recordedByUserId: string;
   createdAt: Timestamp;
-  accountId?: string;
+  accountId?: string; // Inherited from source
+  expenseSourceId?: string; // Links back to the budgeted source
 }
 
-// For client-side display and manipulation
+// For client-side display of individual expense transactions
 export interface ExpenseRecord {
   id: string;
   code: string;
+  expenseName: string;
   date: Date;
   category: ExpenseCategory;
   amount: number;
-  description?: string;
   payee?: string;
   paymentMethod?: string;
+  description?: string;
   recordedByUserId: string;
   createdAt?: Date;
   accountId?: string;
+  expenseSourceId?: string;
 }
 
 
@@ -216,9 +257,12 @@ export type ActivityLogAction =
   | "CREATE_INCOME_RECORD"
   | "UPDATE_INCOME_RECORD"
   | "DELETE_INCOME_RECORD"
-  | "CREATE_EXPENSE_RECORD"
-  | "UPDATE_EXPENSE_RECORD"
-  | "DELETE_EXPENSE_RECORD"
+  | "CREATE_EXPENSE_SOURCE"
+  | "UPDATE_EXPENSE_SOURCE"
+  | "DELETE_EXPENSE_SOURCE"
+  | "CREATE_EXPENSE_TRANSACTION"
+  | "UPDATE_EXPENSE_TRANSACTION"
+  | "DELETE_EXPENSE_TRANSACTION"
   | "USER_LOGIN"
   | "USER_LOGOUT"
   | "USER_SIGNUP"
@@ -300,3 +344,5 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
+
+    

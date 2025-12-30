@@ -8,88 +8,84 @@ import {
   doc,
   updateDoc,
   serverTimestamp,
-  Timestamp,
   type DocumentData,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { ExpenseFormValues, ExpenseCategory } from '@/types';
+import type { ExpenseSourceFormValues } from '@/types';
 import { logActivity } from './activityLogService';
 
-const EXPENSES_COLLECTION = 'expense_records';
+const EXPENSES_SOURCES_COLLECTION = 'expense_sources';
 
-export const addExpenseRecord = async (
-  recordData: ExpenseFormValues,
+export const addExpenseSource = async (
+  sourceData: ExpenseSourceFormValues,
   userId: string,
   userEmail: string
 ): Promise<string> => {
   if (!userId) {
-    throw new Error('User ID is required to add an expense record.');
+    throw new Error('User ID is required to add an expense source.');
   }
   try {
-    const docRef = await addDoc(collection(db, EXPENSES_COLLECTION), {
-      ...recordData,
-      date: Timestamp.fromDate(recordData.date),
+    const docRef = await addDoc(collection(db, EXPENSES_SOURCES_COLLECTION), {
+      ...sourceData,
       recordedByUserId: userId,
       createdAt: serverTimestamp(),
-      category: recordData.category as ExpenseCategory,
     });
 
-    await logActivity(userId, userEmail, "CREATE_EXPENSE_RECORD", {
+    await logActivity(userId, userEmail, "CREATE_EXPENSE_SOURCE", {
       recordId: docRef.id,
-      collectionName: EXPENSES_COLLECTION,
-      extraInfo: `Code: ${recordData.code}, Amount: ${recordData.amount}, Category: ${recordData.category}`
+      collectionName: EXPENSES_SOURCES_COLLECTION,
+      extraInfo: `Name: ${sourceData.expenseName}, Budget: ${sourceData.budget}`
     });
     return docRef.id;
   } catch (error) {
-    console.error('Error adding expense record: ', error);
-    throw error;
+    console.error('Error adding expense source: ', error);
+    throw new Error("Failed to create expense source.");
   }
 };
 
-export const updateExpenseRecord = async (
-  recordId: string,
-  dataToUpdate: ExpenseFormValues,
+export const updateExpenseSource = async (
+  sourceId: string,
+  dataToUpdate: Partial<ExpenseSourceFormValues>,
   userId: string,
   userEmail: string
 ): Promise<void> => {
   if (!userId) {
-    throw new Error('User ID is required to update an expense record.');
+    throw new Error('User ID is required to update an expense source.');
   }
   try {
-    const recordRef = doc(db, EXPENSES_COLLECTION, recordId);
-    const updatePayload: any = { ...dataToUpdate };
-    if (dataToUpdate.date) {
-      updatePayload.date = Timestamp.fromDate(dataToUpdate.date);
-    }
-    await updateDoc(recordRef, updatePayload as DocumentData);
+    const recordRef = doc(db, EXPENSES_SOURCES_COLLECTION, sourceId);
+    await updateDoc(recordRef, dataToUpdate as DocumentData);
 
-    await logActivity(userId, userEmail, "UPDATE_EXPENSE_RECORD", {
-      recordId: recordId,
-      collectionName: EXPENSES_COLLECTION,
-      extraInfo: `Updated fields for expense.`
+    await logActivity(userId, userEmail, "UPDATE_EXPENSE_SOURCE", {
+      recordId: sourceId,
+      collectionName: EXPENSES_SOURCES_COLLECTION,
+      extraInfo: `Updated fields for expense source.`
     });
   } catch (error) {
-    console.error('Error updating expense record: ', error);
-    throw error;
+    console.error('Error updating expense source: ', error);
+    throw new Error("Failed to update expense source.");
   }
 };
 
-export const deleteExpenseRecord = async (
-  recordId: string,
+export const deleteExpenseSource = async (
+  sourceId: string,
   userId: string,
   userEmail: string
 ): Promise<void> => {
    if (!userId) {
-    throw new Error('User ID is required to delete an expense record.');
+    throw new Error('User ID is required to delete an expense source.');
   }
   try {
-    await deleteDoc(doc(db, EXPENSES_COLLECTION, recordId));
-    await logActivity(userId, userEmail, "DELETE_EXPENSE_RECORD", {
-      recordId: recordId,
-      collectionName: EXPENSES_COLLECTION
+    // TODO: Add logic to check for and possibly delete related transactions
+    await deleteDoc(doc(db, EXPENSES_SOURCES_COLLECTION, sourceId));
+    await logActivity(userId, userEmail, "DELETE_EXPENSE_SOURCE", {
+      recordId: sourceId,
+      collectionName: EXPENSES_SOURCES_COLLECTION
     });
   } catch (error) {
-    console.error('Error deleting expense record: ', error);
-    throw error;
+    console.error('Error deleting expense source: ', error);
+    throw new Error("Failed to delete expense source.");
   }
 };
+
+    

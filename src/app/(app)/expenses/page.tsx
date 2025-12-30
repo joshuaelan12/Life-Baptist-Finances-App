@@ -2,46 +2,42 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, PlusCircle, Trash2, Edit, Loader2, AlertTriangle, ReceiptText } from "lucide-react";
-import { format } from "date-fns";
+import { PlusCircle, Trash2, Loader2, AlertTriangle, ReceiptText, Edit } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import type { ExpenseRecord, ExpenseFormValues, ExpenseCategory, ExpenseRecordFirestore, Account, AccountFirestore } from '@/types';
-import { expenseSchema, expenseCategories } from '@/types';
-import { addExpenseRecord, updateExpenseRecord, deleteExpenseRecord } from '@/services/expenseService';
+import type { ExpenseSource, ExpenseSourceFormValues, ExpenseCategory, ExpenseSourceFirestore, Account, AccountFirestore } from '@/types';
+import { expenseSourceSchema, expenseCategories } from '@/types';
+import { addExpenseSource, updateExpenseSource, deleteExpenseSource } from '@/services/expenseService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, orderBy, Timestamp, where, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
+import { collection, query, orderBy, Timestamp, where, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { User } from 'firebase/auth';
 
-const expenseConverter = {
-  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): ExpenseRecord => {
-    const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
+const expenseSourceConverter = {
+  fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): ExpenseSource => {
+    const data = snapshot.data(options) as Omit<ExpenseSourceFirestore, 'id'>;
     return {
       id: snapshot.id,
       code: data.code,
-      date: (data.date as Timestamp).toDate(),
+      expenseName: data.expenseName,
       category: data.category,
-      amount: data.amount,
-      description: data.description,
-      payee: data.payee,
-      paymentMethod: data.paymentMethod,
-      recordedByUserId: data.recordedByUserId,
-      createdAt: (data.createdAt as Timestamp)?.toDate(),
       accountId: data.accountId,
+      description: data.description,
+      budget: data.budget,
+      createdAt: (data.createdAt as Timestamp)?.toDate(),
+      recordedByUserId: data.recordedByUserId,
     };
   }
 };
@@ -58,56 +54,45 @@ const accountConverter = {
     toFirestore: (account: Account) => account,
 };
 
-interface EditExpenseDialogProps {
+
+interface EditExpenseSourceDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  record: ExpenseRecord | null;
-  onSave: (updatedData: ExpenseFormValues, recordId: string) => Promise<void>;
+  source: ExpenseSource | null;
+  onSave: (updatedData: Partial<ExpenseSourceFormValues>, sourceId: string) => Promise<void>;
   currentUser: User | null;
   expenseAccounts: Account[] | undefined;
 }
 
-const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, expenseAccounts }) => {
+const EditExpenseSourceDialog: React.FC<EditExpenseSourceDialogProps> = ({ isOpen, onOpenChange, source, onSave, currentUser, expenseAccounts }) => {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
-  const editForm = useForm<ExpenseFormValues>({
-    resolver: zodResolver(expenseSchema),
+  
+  const editForm = useForm<ExpenseSourceFormValues>({
+    resolver: zodResolver(expenseSourceSchema),
   });
 
   React.useEffect(() => {
-    if (record && isOpen) {
+    if (source && isOpen) {
       editForm.reset({
-        code: record.code,
-        date: record.date,
-        category: record.category,
-        amount: record.amount,
-        description: record.description || "",
-        payee: record.payee || "",
-        paymentMethod: record.paymentMethod || "",
-        accountId: record.accountId || "",
-      });
-    } else if (!isOpen) {
-      editForm.reset({
-        code: "",
-        date: new Date(),
-        category: undefined,
-        amount: 0,
-        description: "",
-        payee: "",
-        paymentMethod: "",
-        accountId: "",
+        code: source.code,
+        expenseName: source.expenseName,
+        category: source.category,
+        budget: source.budget || 0,
+        accountId: source.accountId || "",
+        description: source.description || "",
       });
     }
-  }, [record, editForm, isOpen]);
+  }, [source, isOpen, editForm]);
 
-  const handleEditSubmit = async (data: ExpenseFormValues) => {
-    if (!record || !currentUser?.uid) {
+  const handleEditSubmit = async (data: ExpenseSourceFormValues) => {
+    if (!source || !currentUser?.uid) {
       toast({ variant: "destructive", title: "Error", description: "Cannot save. Record or user information is missing." });
       return;
     }
     setIsSaving(true);
     try {
-      await onSave(data, record.id);
+      await onSave(data, source.id);
       onOpenChange(false);
     } catch (error) {
       // Error toast is handled by onSave caller
@@ -116,184 +101,58 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
     }
   };
 
-  if (!record) return null;
+  if (!source) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Expense Record</DialogTitle>
+          <DialogTitle>Edit Expense Source</DialogTitle>
           <DialogDescription>
-            Update the details for this expense. Click save when you're done.
+            Update the details for this expense source.
           </DialogDescription>
         </DialogHeader>
         <Form {...editForm}>
           <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-            <FormField
-                control={editForm.control}
-                name="code"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Transaction Code</FormLabel>
-                    <FormControl>
-                    <Input placeholder="e.g., 10011" {...field} disabled={isSaving}/>
-                    </FormControl>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-            <FormField
-              control={editForm.control}
-              name="date"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Date of Expense</FormLabel>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={"outline"}
-                          className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                          disabled={isSaving}
-                        >
-                          {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={field.value}
-                        onSelect={field.onChange}
-                        disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-                control={editForm.control}
-                name="accountId"
-                render={({ field }) => (
-                <FormItem>
-                    <FormLabel>Account</FormLabel>
+             <FormField control={editForm.control} name="code" render={({ field }) => (
+                <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+            )}/>
+             <FormField control={editForm.control} name="expenseName" render={({ field }) => (
+                <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+            )}/>
+             <FormField control={editForm.control} name="category" render={({ field }) => (
+                <FormItem><FormLabel>Category</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                    <FormControl>
-                        <SelectTrigger>
-                        <SelectValue placeholder="Select an expense account" />
-                        </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                        {expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
-                    </SelectContent>
+                        <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                        <SelectContent>{expenseCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent>
                     </Select>
-                    <FormMessage />
-                </FormItem>
-                )}
-            />
-             <FormField
-                control={editForm.control}
-                name="category"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Category</FormLabel>
+                <FormMessage /></FormItem>
+            )}/>
+             <FormField control={editForm.control} name="accountId" render={({ field }) => (
+                <FormItem><FormLabel>Account</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select expense category" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {expenseCategories.map(cat => (
-                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                        ))}
-                      </SelectContent>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select an expense account" /></SelectTrigger></FormControl>
+                        <SelectContent>{expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            <FormField
-              control={editForm.control}
-              name="amount"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Amount (XAF)</FormLabel>
-                  <FormControl>
-                    <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={isSaving} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-             <FormField
-              control={editForm.control}
-              name="payee"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Payee (Optional)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="E.g., ENEO, CAMWATER, Landlord" {...field} disabled={isSaving} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={editForm.control}
-              name="paymentMethod"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Payment Method (Optional)</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value || ""} disabled={isSaving}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select payment method" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="Cash">Cash</SelectItem>
-                        <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                        <SelectItem value="Mobile Money">Mobile Money</SelectItem>
-                        <SelectItem value="Cheque">Cheque</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={editForm.control}
-              name="description"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Description (Optional)</FormLabel>
-                  <FormControl>
-                    <Textarea placeholder="E.g., Electricity bill for March" {...field} disabled={isSaving} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+                <FormMessage /></FormItem>
+            )}/>
+             <FormField control={editForm.control} name="budget" render={({ field }) => (
+                <FormItem><FormLabel>Annual Budget (XAF)</FormLabel><FormControl><Input type="number" {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
+            )}/>
+             <FormField control={editForm.control} name="description" render={({ field }) => (
+                <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
+            )}/>
             <DialogFooter className="pt-4">
-               <DialogClose asChild>
-                 <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
-              </DialogClose>
+              <DialogClose asChild><Button type="button" variant="outline" disabled={isSaving}>Cancel</Button></DialogClose>
               <Button type="submit" disabled={isSaving || !currentUser}>
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Save Changes
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save Changes
               </Button>
             </DialogFooter>
           </form>
         </Form>
       </DialogContent>
     </Dialog>
-  );
+  )
 };
 
 
@@ -301,76 +160,74 @@ export default function ExpensesPage() {
   const { toast } = useToast();
   const [authUser, authLoading, authError] = useAuthState(auth);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
+  const [editingSource, setEditingSource] = useState<ExpenseSource | null>(null);
 
-  const form = useForm<ExpenseFormValues>({
-    resolver: zodResolver(expenseSchema),
+  const form = useForm<ExpenseSourceFormValues>({
+    resolver: zodResolver(expenseSourceSchema),
     defaultValues: {
       code: "",
-      date: new Date(),
+      expenseName: "",
       category: undefined,
-      amount: 0,
+      budget: 0,
       description: "",
-      payee: "",
-      paymentMethod: "",
       accountId: "",
     },
   });
 
-  const expensesQuery = useMemo(() => authUser ? query(collection(db, 'expense_records'), orderBy('date', 'desc')).withConverter<ExpenseRecord>(expenseConverter) : null, [authUser]);
-  const [expenseRecords, loadingExpenses, errorExpenses] = useCollectionData(expensesQuery);
+  const expenseSourcesQuery = useMemo(() => authUser ? query(collection(db, 'expense_sources'), orderBy('expenseName')).withConverter(expenseSourceConverter) : null, [authUser]);
+  const [expenseSources, loadingSources, errorSources] = useCollectionData(expenseSourcesQuery);
   
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Expense'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [expenseAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
 
 
-  const onSubmit = async (data: ExpenseFormValues) => {
+  const onSubmit = async (data: ExpenseSourceFormValues) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to add expenses." });
       return;
     }
     try {
-      await addExpenseRecord(data, authUser.uid, authUser.email);
-      form.reset({ code: "", date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "", accountId: "" });
-      toast({ title: "Success", description: "Expense record saved successfully." });
+      await addExpenseSource(data, authUser.uid, authUser.email);
+      form.reset({ code: "", expenseName: "", category: undefined, budget: 0, description: "", accountId: "" });
+      toast({ title: "Success", description: "Expense source created successfully." });
     } catch (err) {
       console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to save expense record." });
+      toast({ variant: "destructive", title: "Error", description: "Failed to create expense source." });
     }
   };
 
-  const handleDeleteRecord = async (record: ExpenseRecord) => {
-    if (!authUser?.uid || !authUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete records." });
-      return;
-    }
-    try {
-      await deleteExpenseRecord(record.id, authUser.uid, authUser.email);
-      toast({ title: "Deleted", description: `Expense record for ${format(record.date, "PP")} deleted successfully.` });
-    } catch (err) {
-      console.error(err);
-      toast({ variant: "destructive", title: "Error", description: "Failed to delete expense record." });
-    }
-  };
-
-  const handleOpenEditDialog = (record: ExpenseRecord) => {
-    setEditingRecord(record);
+  const handleOpenEditDialog = (source: ExpenseSource) => {
+    setEditingSource(source);
     setIsEditDialogOpen(true);
   };
 
-  const handleSaveEditedExpense = async (updatedData: ExpenseFormValues, recordId: string) => {
+  const handleSaveEditedSource = async (updatedData: Partial<ExpenseSourceFormValues>, sourceId: string) => {
     if (!authUser?.uid || !authUser.email) {
-      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update an expense." });
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to update." });
       throw new Error("User not authenticated");
     }
     try {
-      await updateExpenseRecord(recordId, updatedData, authUser.uid, authUser.email);
-      toast({ title: "Expense Updated", description: `Expense dated ${format(updatedData.date, "PP")} has been updated.`});
-      setEditingRecord(null);
+      await updateExpenseSource(sourceId, updatedData, authUser.uid, authUser.email);
+      toast({ title: "Expense Source Updated", description: `${updatedData.expenseName} has been updated.`});
+      setEditingSource(null);
     } catch (err) {
         console.error(err);
-        toast({ variant: "destructive", title: "Error", description: "Failed to update expense record." });
+        toast({ variant: "destructive", title: "Error", description: "Failed to update expense source." });
         throw err;
+    }
+  };
+  
+  const handleDeleteRecord = async (source: ExpenseSource) => {
+    if (!authUser?.uid || !authUser.email) {
+      toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete." });
+      return;
+    }
+    try {
+      await deleteExpenseSource(source.id, authUser.uid, authUser.email);
+      toast({ title: "Deleted", description: `Expense source deleted successfully.` });
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Error", description: "Failed to delete expense source." });
     }
   };
 
@@ -378,8 +235,8 @@ export default function ExpensesPage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
   
-  const isLoading = authLoading || loadingExpenses || loadingAccounts;
-  const dataError = authError || errorExpenses || errorAccounts;
+  const isLoading = authLoading || loadingSources || loadingAccounts;
+  const dataError = authError || errorSources || errorAccounts;
 
   if (isLoading) {
     return (
@@ -411,15 +268,15 @@ export default function ExpensesPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Add New Expense</CardTitle>
-          <CardDescription>Enter the details of the expense incurred.</CardDescription>
+          <CardTitle>Create Budgeted Expense Item</CardTitle>
+          <CardDescription>Define a recurring expense item and set an annual budget for it.</CardDescription>
         </CardHeader>
         <CardContent>
           {!authUser && (
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Authentication Required</AlertTitle>
-              <AlertDescription>Please log in to add or view expense records.</AlertDescription>
+              <AlertDescription>Please log in to add or view expense items.</AlertDescription>
             </Alert>
           )}
           {authUser && (
@@ -431,9 +288,9 @@ export default function ExpensesPage() {
                     name="code"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Transaction Code</FormLabel>
+                        <FormLabel>Code</FormLabel>
                         <FormControl>
-                          <Input placeholder="e.g., 10011" {...field} disabled={form.formState.isSubmitting}/>
+                          <Input placeholder="e.g., 5001" {...field} disabled={form.formState.isSubmitting}/>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -441,33 +298,13 @@ export default function ExpensesPage() {
                   />
                   <FormField
                     control={form.control}
-                    name="date"
+                    name="expenseName"
                     render={({ field }) => (
-                      <FormItem className="flex flex-col">
-                        <FormLabel>Date</FormLabel>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <FormControl>
-                              <Button
-                                variant={"outline"}
-                                className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                                disabled={form.formState.isSubmitting}
-                              >
-                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                              </Button>
-                            </FormControl>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={field.value}
-                              onSelect={field.onChange}
-                              disabled={(date) => date > new Date() || date < new Date("1900-01-01")}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
+                      <FormItem>
+                        <FormLabel>Expense Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g., Office Stationery" {...field} disabled={form.formState.isSubmitting}/>
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -518,10 +355,10 @@ export default function ExpensesPage() {
                   />
                    <FormField
                     control={form.control}
-                    name="amount"
+                    name="budget"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Amount (XAF)</FormLabel>
+                        <FormLabel>Annual Budget (XAF)</FormLabel>
                         <FormControl>
                           <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
                         </FormControl>
@@ -529,45 +366,8 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
-                   <FormField
-                    control={form.control}
-                    name="payee"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Payee (Optional)</FormLabel>
-                        <FormControl>
-                          <Input placeholder="E.g., ENEO, CAMWATER, Landlord" {...field} disabled={form.formState.isSubmitting} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </div>
-                 <div className="grid md:grid-cols-2 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="paymentMethod"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Payment Method (Optional)</FormLabel>
-                         <Select onValueChange={field.onChange} value={field.value || ""} disabled={form.formState.isSubmitting}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select payment method" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="Cash">Cash</SelectItem>
-                            <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                            <SelectItem value="Mobile Money">Mobile Money</SelectItem>
-                            <SelectItem value="Cheque">Cheque</SelectItem>
-                             <SelectItem value="Other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                 <div className="grid grid-cols-1">
                   <FormField
                     control={form.control}
                     name="description"
@@ -575,7 +375,7 @@ export default function ExpensesPage() {
                       <FormItem>
                         <FormLabel>Description (Optional)</FormLabel>
                         <FormControl>
-                          <Textarea placeholder="E.g., Electricity bill for March, Offering for guest speaker" {...field} disabled={form.formState.isSubmitting}/>
+                          <Textarea placeholder="E.g., Yearly budget for all office supplies." {...field} disabled={form.formState.isSubmitting}/>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -585,7 +385,7 @@ export default function ExpensesPage() {
 
                 <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !authUser}>
                   {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
-                   Save Expense
+                   Create Expense Source
                 </Button>
               </form>
             </Form>
@@ -595,43 +395,43 @@ export default function ExpensesPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Recent Expense Records</CardTitle>
+          <CardTitle>Budgeted Expense Items</CardTitle>
+          <CardDescription>Click on an item to view its transaction history and record new expenses.</CardDescription>
         </CardHeader>
         <CardContent>
-          {!isLoading && expenseRecords && expenseRecords.length > 0 && (
+          {isLoading && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
+          {!isLoading && expenseSources && expenseSources.length > 0 && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Code</TableHead>
-                    <TableHead>Date</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Payee</TableHead>
-                    <TableHead>Payment Method</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>Annual Budget</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {expenseRecords.map((record) => {
-                      const account = expenseAccounts?.find(a => a.id === record.accountId);
+                  {expenseSources.map((source) => {
+                      const account = expenseAccounts?.find(a => a.id === source.accountId);
                       return (
-                        <TableRow key={record.id}>
-                          <TableCell>{record.code}</TableCell>
-                          <TableCell>{format(record.date, "PP")}</TableCell>
+                        <TableRow key={source.id}>
+                          <TableCell>{source.code}</TableCell>
+                          <TableCell>
+                            <Link href={`/expenses/${source.id}`} className="hover:underline text-primary font-medium">
+                                {source.expenseName}
+                            </Link>
+                          </TableCell>
                           <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
-                          <TableCell>{record.category}</TableCell>
-                          <TableCell>{formatCurrency(record.amount)}</TableCell>
-                          <TableCell>{record.payee || 'N/A'}</TableCell>
-                          <TableCell>{record.paymentMethod || 'N/A'}</TableCell>
-                          <TableCell className="max-w-[200px] truncate" title={record.description || ''}>{record.description || 'N/A'}</TableCell>
+                          <TableCell>{source.category}</TableCell>
+                          <TableCell>{formatCurrency(source.budget || 0)}</TableCell>
                           <TableCell className="text-right space-x-1">
-                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense">
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense source">
                                 <Edit className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(record)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete expense">
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete expense source">
                                 <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </TableCell>
@@ -642,19 +442,21 @@ export default function ExpensesPage() {
               </Table>
             </div>
           )}
-           {!isLoading && (!expenseRecords || expenseRecords.length === 0) && (
-            <p className="text-center text-muted-foreground py-10">No expense records yet. Add one above!</p>
+           {!isLoading && (!expenseSources || expenseSources.length === 0) && (
+            <p className="text-center text-muted-foreground py-10">No budgeted expense items created yet. Add one above!</p>
           )}
         </CardContent>
       </Card>
-      <EditExpenseDialog
+      <EditExpenseSourceDialog
         isOpen={isEditDialogOpen}
         onOpenChange={setIsEditDialogOpen}
-        record={editingRecord}
-        onSave={handleSaveEditedExpense}
+        source={editingSource}
+        onSave={handleSaveEditedSource}
         currentUser={authUser}
         expenseAccounts={expenseAccounts}
       />
     </div>
   );
 }
+
+    
