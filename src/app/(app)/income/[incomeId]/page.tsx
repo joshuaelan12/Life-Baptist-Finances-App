@@ -53,6 +53,7 @@ const incomeTransactionConverter = {
 
 const transactionSchema = z.object({
   code: z.string().min(1, "Transaction code is required."),
+  transactionName: z.string().min(1, "Transaction name is required."),
   amount: z.coerce.number().positive("Amount must be positive."),
   date: z.date({ required_error: "Date is required." }),
   description: z.string().optional(),
@@ -70,6 +71,7 @@ export default function IncomeSourceDetailsPage() {
         resolver: zodResolver(transactionSchema),
         defaultValues: {
             code: "",
+            transactionName: "",
             date: new Date(),
             amount: 0,
             description: "",
@@ -96,11 +98,10 @@ export default function IncomeSourceDetailsPage() {
                 ...data,
                 category: source.category,
                 accountId: source.accountId || '',
-                transactionName: source.transactionName, // Inherit name from source
             };
             await addIncomeTransaction(transactionData, incomeId, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Transaction recorded." });
-            form.reset({ code: "", date: new Date(), amount: 0, description: "" });
+            form.reset({ code: "", transactionName: "", date: new Date(), amount: 0, description: "" });
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record transaction." });
         }
@@ -189,6 +190,9 @@ export default function IncomeSourceDetailsPage() {
                                 <FormField control={form.control} name="code" render={({ field }) => (
                                     <FormItem><FormLabel>Transaction Code</FormLabel><FormControl><Input placeholder="e.g. 101-01" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
+                                <FormField control={form.control} name="transactionName" render={({ field }) => (
+                                    <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. First service collection" {...field} /></FormControl><FormMessage /></FormItem>
+                                )}/>
                                 <FormField control={form.control} name="amount" render={({ field }) => (
                                     <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
@@ -211,6 +215,7 @@ export default function IncomeSourceDetailsPage() {
                                         <TableRow>
                                             <TableHead>Date</TableHead>
                                             <TableHead>Code</TableHead>
+                                            <TableHead>Name</TableHead>
                                             <TableHead className="text-right">Amount</TableHead>
                                         </TableRow>
                                     </TableHeader>
@@ -219,6 +224,7 @@ export default function IncomeSourceDetailsPage() {
                                             <TableRow key={tx.id}>
                                                 <TableCell>{format(tx.date, "PP")}</TableCell>
                                                 <TableCell>{tx.code}</TableCell>
+                                                <TableCell>{tx.transactionName}</TableCell>
                                                 <TableCell className="text-right">{formatCurrency(tx.amount)}</TableCell>
                                             </TableRow>
                                         ))}
@@ -234,5 +240,3 @@ export default function IncomeSourceDetailsPage() {
         </div>
     );
 }
-
-    
