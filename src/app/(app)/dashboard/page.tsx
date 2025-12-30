@@ -12,7 +12,7 @@ import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
-import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore } from '@/types';
+import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore } from '@/types';
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
@@ -33,26 +33,6 @@ const incomeConverter = {
       amount: data.amount,
       description: data.description,
       memberName: data.memberName,
-      recordedByUserId: data.recordedByUserId,
-      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
-    };
-  }
-};
-
-const titheConverter = {
-  toFirestore(record: TitheRecord): DocumentData {
-    const { id, date, createdAt, recordedByUserId, ...rest } = record;
-    const data: any = { ...rest, date: Timestamp.fromDate(date) };
-    if (recordedByUserId) data.recordedByUserId = recordedByUserId;
-    return data;
-  },
-  fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): TitheRecord {
-    const data = snapshot.data(options) as Omit<TitheRecordFirestore, 'id'>;
-    return {
-      id: snapshot.id,
-      memberName: data.memberName,
-      date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      amount: data.amount,
       recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
     };
@@ -96,12 +76,6 @@ export default function DashboardPage() {
     : null;
   const [incomeRecords, isLoadingIncome, errorIncome] = useCollectionData(incomeQuery);
 
-  const tithesCollectionRef = authUser ? collection(db, 'tithe_records') : null;
-  const tithesQuery = tithesCollectionRef
-    ? query(tithesCollectionRef, orderBy('date', 'desc')).withConverter<TitheRecord>(titheConverter)
-    : null;
-  const [titheRecords, isLoadingTithes, errorTithes] = useCollectionData(tithesQuery);
-
   const expensesCollectionRef = authUser ? collection(db, 'expense_records') : null;
   const expensesQuery = expensesCollectionRef
     ? query(expensesCollectionRef, orderBy('date', 'desc')).withConverter<ExpenseRecord>(expenseConverter)
@@ -112,23 +86,25 @@ export default function DashboardPage() {
   const financialSummary = useMemo(() => {
     let totalOfferings = 0;
     let otherIncome = 0;
+    let totalTithes = 0;
     
     incomeRecords?.forEach(record => {
       if (record.category === "Offering") {
         totalOfferings += record.amount;
+      } else if (record.category === "Tithe") {
+        totalTithes += record.amount;
       } else if (record.category === "Donation" || record.category === "Other") {
         otherIncome += record.amount;
       }
     });
 
-    const totalTithes = titheRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
     const totalIncome = totalOfferings + totalTithes + otherIncome;
     const totalExpenses = expenseRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
     const netBalance = totalIncome - totalExpenses;
 
 
     return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance };
-  }, [incomeRecords, titheRecords, expenseRecords]);
+  }, [incomeRecords, expenseRecords]);
 
   const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance } = financialSummary;
   
@@ -152,11 +128,6 @@ export default function DashboardPage() {
           monthlyIncomeTotal += record.amount;
         }
       });
-      titheRecords?.forEach(record => {
-        if (record.date >= monthStart && record.date <= monthEnd) {
-          monthlyIncomeTotal += record.amount;
-        }
-      });
       
       let monthlyExpensesTotal = 0;
       expenseRecords?.forEach(record => {
@@ -172,7 +143,7 @@ export default function DashboardPage() {
       });
     }
     return dataForLast6Months;
-  }, [incomeRecords, titheRecords, expenseRecords]);
+  }, [incomeRecords, expenseRecords]);
   
   const incomeBreakdownData = useMemo(() => [
     { name: 'Offerings', value: totalOfferings, fill: "hsl(var(--chart-1))" },
@@ -221,7 +192,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (isLoadingIncome || isLoadingTithes || isLoadingExpenses) {
+  if (isLoadingIncome || isLoadingExpenses) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-100px)]">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -230,13 +201,13 @@ export default function DashboardPage() {
     );
   }
 
-  if (errorIncome || errorTithes || errorExpenses) {
+  if (errorIncome || errorExpenses) {
     return (
       <Alert variant="destructive" className="mt-4">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>Error Loading Data</AlertTitle>
         <AlertDescription>
-          {errorIncome?.message || errorTithes?.message || errorExpenses?.message || "Could not load financial data."}
+          {errorIncome?.message || errorExpenses?.message || "Could not load financial data."}
         </AlertDescription>
       </Alert>
     );
@@ -370,7 +341,5 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
 
     

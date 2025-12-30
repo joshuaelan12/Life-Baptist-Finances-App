@@ -18,14 +18,13 @@ import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, where } from 'firebase/firestore';
-import type { IncomeRecord, TitheRecord, ExpenseRecord, IncomeRecordFirestore, TitheRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore } from '@/types';
+import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore, Member } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
-type ReportType = "income" | "expenses" | "tithes" | "summary" | "budget_vs_actuals" | "balance_sheet";
+type ReportType = "income" | "expenses" | "summary" | "budget_vs_actuals" | "balance_sheet";
 type PeriodType = "all" | "monthly" | "custom";
 
-// We keep the converters here to ensure the useCollectionData hooks work as expected for data display/preview
 const incomeConverter = {
   toFirestore(record: IncomeRecord): DocumentData { return record as DocumentData; },
   fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): IncomeRecord {
@@ -41,20 +40,6 @@ const incomeConverter = {
       recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
       accountId: data.accountId,
-    };
-  }
-};
-const titheConverter = {
-  toFirestore(record: TitheRecord): DocumentData { return record as DocumentData; },
-  fromFirestore(snapshot: QueryDocumentSnapshot, options: SnapshotOptions): TitheRecord {
-    const data = snapshot.data(options) as Omit<TitheRecordFirestore, 'id'>;
-    return {
-      id: snapshot.id,
-      memberId: data.memberId,
-      memberName: data.memberName,
-      date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      amount: data.amount, recordedByUserId: data.recordedByUserId,
-      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
     };
   }
 };
@@ -103,9 +88,9 @@ export default function ReportsPage() {
   const [titheMemberSearch, setTitheMemberSearch] = useState('');
 
   const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
-  const [titheRecords] = useCollectionData(collection(db, 'tithe_records').withConverter(titheConverter));
   const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
   const [accounts, loadingAccounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
+  const [members] = useCollectionData(collection(db, 'members'));
   
   const accountsMap = useMemo(() => {
     if (!accounts) return new Map<string, Account>();
@@ -113,17 +98,17 @@ export default function ReportsPage() {
   }, [accounts]);
 
   const filteredTitheRecords = useMemo(() => {
-    if (!titheMemberSearch || !titheRecords) return [];
-    return titheRecords.filter(r => 
-      r.memberName && r.memberName.toLowerCase().includes(titheMemberSearch.toLowerCase())
+    if (!titheMemberSearch || !incomeRecords) return [];
+    return incomeRecords.filter(r => 
+      r.category === 'Tithe' && r.memberName && r.memberName.toLowerCase().includes(titheMemberSearch.toLowerCase())
     ).sort((a,b) => a.date.getTime() - b.date.getTime());
-  }, [titheRecords, titheMemberSearch]);
+  }, [incomeRecords, titheMemberSearch]);
 
   const uniqueMemberNames = useMemo(() => {
-    if (!titheRecords) return [];
-    const names = new Set(titheRecords.map(r => r.memberName).filter(Boolean) as string[]);
+    if (!incomeRecords) return [];
+    const names = new Set(incomeRecords.filter(r => r.category === 'Tithe' && r.memberName).map(r => r.memberName) as string[]);
     return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [titheRecords]);
+  }, [incomeRecords]);
   
   const selectedMember = useMemo(() => {
     if (titheMemberSearch && uniqueMemberNames.includes(titheMemberSearch)) {
@@ -169,26 +154,16 @@ export default function ReportsPage() {
             .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
             .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
           break;
-        case 'tithes':
-          reportTitle = `Tithe Report ${periodString}`;
-          rawData = (titheRecords || []).filter(r => 
-            !startDate || (r.date >= startDate && r.date <= endDate!)
-          );
-          break;
         case 'summary':
            reportTitle = `Financial Summary ${periodString}`;
            const filteredIncome = (incomeRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
-           const filteredTithes = (titheRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
            const filteredExpenses = (expenseRecords || []).filter(r => !startDate || (r.date >= startDate && r.date <= endDate!));
-           const totalOfferingsAndDonations = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
-           const totalTithes = filteredTithes.reduce((sum, r) => sum + r.amount, 0);
+           const totalIncome = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
            const totalExpenses = filteredExpenses.reduce((sum, r) => sum + r.amount, 0);
            rawData = [
-             { Category: 'Total Income (Offerings, Donations, etc.)', Amount: totalOfferingsAndDonations },
-             { Category: 'Total Tithes', Amount: totalTithes },
-             { Category: 'Total Combined Income', Amount: totalOfferingsAndDonations + totalTithes },
+             { Category: 'Total Income', Amount: totalIncome },
              { Category: 'Total Expenses', Amount: totalExpenses },
-             { Category: 'Net Balance', Amount: totalOfferingsAndDonations + totalTithes - totalExpenses },
+             { Category: 'Net Balance', Amount: totalIncome - totalExpenses },
            ];
           break;
         case 'budget_vs_actuals':
@@ -298,7 +273,6 @@ export default function ReportsPage() {
                   <SelectItem value="summary">Financial Summary</SelectItem>
                   <SelectItem value="income">Income Report</SelectItem>
                   <SelectItem value="expenses">Expense Report</SelectItem>
-                  <SelectItem value="tithes">Tithe Report</SelectItem>
                   <SelectItem value="budget_vs_actuals">Budget vs Actuals</SelectItem>
                   <SelectItem value="balance_sheet">Balance Sheet</SelectItem>
                 </SelectContent>

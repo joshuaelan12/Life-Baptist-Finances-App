@@ -2,7 +2,7 @@
 import type { Timestamp } from 'firebase/firestore';
 import { z } from 'zod';
 
-// For TithesPage form
+// For TithesPage form - DEPRECATED but kept for reference during transition
 export const titheSchema = z.object({
   date: z.date({ required_error: "Date is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
@@ -59,6 +59,7 @@ export interface IncomeRecord {
 }
 
 
+// TitheRecord types are now deprecated in favor of IncomeRecord with "Tithe" category
 export interface TitheRecord {
   id:string;
   memberId: string;
@@ -69,7 +70,6 @@ export interface TitheRecord {
   createdAt?: Date;
 }
 
-// For data stored in Firestore, assuming we'll convert to TitheRecord on client
 export interface TitheRecordFirestore {
   id:string;
   memberId: string;

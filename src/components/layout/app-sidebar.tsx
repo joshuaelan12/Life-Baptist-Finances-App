@@ -45,7 +45,6 @@ const navItems = [
   { href: '/accounts', label: 'Accounts', icon: BookUser }, // Added Accounts link
   { href: '/income', label: 'Income', icon: DollarSign },
   { href: '/expenses', label: 'Expenses', icon: ReceiptText },
-  { href: '/tithes', label: 'Tithes', icon: Users },
   { href: '/reports', label: 'Reports', icon: FileText },
   { href: '/activity-log', label: 'Activity Log', icon: History },
 ];
@@ -147,3 +146,5 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+
+    

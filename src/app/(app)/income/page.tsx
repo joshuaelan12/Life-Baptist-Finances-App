@@ -10,16 +10,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit } from "lucide-react";
+import { CalendarIcon, PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit, UserPlus, Search, Users } from "lucide-react";
 import { format } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore, IncomeFormValues as EditIncomeFormValues } from '@/types';
-import { incomeSchema } from '@/types';
+import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore, IncomeFormValues as EditIncomeFormValues, Member, MemberFirestore, MemberFormValues } from '@/types';
+import { incomeSchema, memberSchema } from '@/types';
 import { addIncomeRecord, deleteIncomeRecord, updateIncomeRecord } from '@/services/incomeService';
+import { addMember, updateMember, deleteMember } from '@/services/memberService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -60,6 +61,19 @@ const accountConverter = {
     toFirestore: (account: Account) => account,
 };
 
+const memberConverter = {
+    fromFirestore: (snapshot: any): Member => {
+        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        };
+    },
+    toFirestore: (member: Member) => member,
+};
+
+
 interface EditIncomeDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,9 +81,10 @@ interface EditIncomeDialogProps {
   onSave: (updatedData: EditIncomeFormValues, recordId: string) => Promise<void>;
   currentUser: User | null;
   incomeAccounts: Account[] | undefined;
+  members: Member[] | undefined;
 }
 
-const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, incomeAccounts }) => {
+const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChange, record, onSave, currentUser, incomeAccounts, members }) => {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
   
@@ -227,9 +242,16 @@ const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChang
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Member Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter member's name" {...field} disabled={isSaving}/>
-                    </FormControl>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                        <FormControl>
+                            <SelectTrigger>
+                            <SelectValue placeholder="Select a member" />
+                            </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                            {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -267,7 +289,12 @@ export default function IncomePage() {
   const { toast } = useToast();
   const [authUser, authLoading] = useAuthState(auth);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isMemberDialogOpen, setIsMemberDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<IncomeRecord | null>(null);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [isSubmittingMember, setIsSubmittingMember] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
 
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
@@ -282,6 +309,11 @@ export default function IncomePage() {
     },
   });
 
+  const memberForm = useForm<MemberFormValues>({
+    resolver: zodResolver(memberSchema),
+    defaultValues: { fullName: "" },
+  });
+
   const selectedCategory = form.watch("category");
 
   const incomeQuery = useMemo(() => authUser ? query(collection(db, 'income_records'), orderBy('date', 'desc')).withConverter<IncomeRecord>(incomeConverter) : null, [authUser]);
@@ -290,6 +322,15 @@ export default function IncomePage() {
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [incomeAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
   
+  const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
+  const [members, loadingMembers, errorMembers] = useCollectionData(membersQuery);
+  
+  const filteredMembers = useMemo(() => {
+    if (!members) return [];
+    if (!searchTerm) return members;
+    return members.filter(member => member.fullName.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [members, searchTerm]);
+
   const onSubmit = async (data: IncomeFormValues) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to add income." });
@@ -344,12 +385,60 @@ export default function IncomePage() {
     }
   };
 
+  const handleMemberSubmit = async (data: MemberFormValues) => {
+      if (!authUser) return;
+      setIsSubmittingMember(true);
+      try {
+          if (editingMember) {
+              await updateMember(editingMember.id, data, authUser.uid, authUser.email);
+              toast({ title: "Success", description: "Member updated successfully." });
+          } else {
+              await addMember(data, authUser.uid, authUser.email);
+              toast({ title: "Success", description: "Member added successfully." });
+          }
+          setIsMemberDialogOpen(false);
+          setEditingMember(null);
+          memberForm.reset({ fullName: "" });
+      } catch (error: any) {
+          toast({ variant: "destructive", title: "Error", description: error.message || "Failed to save member." });
+      } finally {
+          setIsSubmittingMember(false);
+      }
+  };
+  
+  const openMemberDialog = (member: Member | null) => {
+      setEditingMember(member);
+      memberForm.reset(member ? { fullName: member.fullName } : { fullName: "" });
+      setIsMemberDialogOpen(true);
+  };
+  
+  const handleDeleteMember = async (memberId: string) => {
+      if (!authUser) return;
+      
+      const hasTithes = incomeRecords?.some(r => r.category === 'Tithe' && r.memberName === members?.find(m => m.id === memberId)?.fullName);
+      if (hasTithes) {
+          toast({
+              variant: "destructive",
+              title: "Deletion Blocked",
+              description: "Cannot delete a member with existing tithe records. Please remove their tithes first.",
+          });
+          return;
+      }
+      
+      try {
+          await deleteMember(memberId, authUser.uid, authUser.email);
+          toast({ title: "Success", description: "Member deleted successfully." });
+      } catch (error: any) {
+          toast({ variant: "destructive", title: "Error", description: error.message || "Failed to delete member." });
+      }
+  };
+
   const formatCurrency = (value: number) => {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
 
-  const isLoading = authLoading || loadingIncome || loadingAccounts;
-  const dataError = errorIncome || errorAccounts;
+  const isLoading = authLoading || loadingIncome || loadingAccounts || loadingMembers;
+  const dataError = errorIncome || errorAccounts || errorMembers;
 
   if (isLoading && !incomeRecords && !incomeAccounts) { 
     return (
@@ -370,7 +459,7 @@ export default function IncomePage() {
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle>Add New Income</CardTitle>
-          <CardDescription>Enter the details of the income received.</CardDescription>
+          <CardDescription>Enter the details of the income received. For tithes, select the member from the list.</CardDescription>
         </CardHeader>
         <CardContent>
           {!authUser && (
@@ -495,10 +584,17 @@ export default function IncomePage() {
                         name="memberName"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Member Name (For 'Tithe' category)</FormLabel>
-                            <FormControl>
-                              <Input placeholder="Enter member's name" {...field} disabled={form.formState.isSubmitting}/>
-                            </FormControl>
+                            <FormLabel>Member Name</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting || loadingMembers}>
+                                <FormControl>
+                                    <SelectTrigger>
+                                    <SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} />
+                                    </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                    {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -529,6 +625,52 @@ export default function IncomePage() {
           )}
         </CardContent>
       </Card>
+      
+      <Card className="shadow-lg">
+          <CardHeader>
+              <CardTitle className="flex items-center"><Users className="mr-2"/> Manage Members</CardTitle>
+              <div className="flex justify-between items-center">
+                  <CardDescription>Add, edit, or remove church members.</CardDescription>
+                  <Button onClick={() => openMemberDialog(null)}><UserPlus className="mr-2 h-4 w-4" /> Add Member</Button>
+              </div>
+               <div className="relative pt-2">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                      type="search"
+                      placeholder="Search by name..."
+                      className="pl-8 w-full"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+              </div>
+          </CardHeader>
+          <CardContent>
+              {loadingMembers && <div className="text-center p-4">Loading members...</div>}
+              {errorMembers && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{errorMembers.message}</AlertDescription></Alert>}
+              {!loadingMembers && !errorMembers && filteredMembers.length > 0 && (
+                  <Table>
+                      <TableHeader><TableRow><TableHead>Member Name</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                      <TableBody>
+                          {filteredMembers.map(member => (
+                              <TableRow key={member.id}>
+                                  <TableCell>{member.fullName}</TableCell>
+                                  <TableCell className="text-right space-x-1">
+                                      <Button variant="ghost" size="icon" onClick={() => openMemberDialog(member)}><Edit className="h-4 w-4" /></Button>
+                                      <Button variant="ghost" size="icon" onClick={() => handleDeleteMember(member.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                  </TableCell>
+                              </TableRow>
+                          ))}
+                      </TableBody>
+                  </Table>
+              )}
+               {!loadingMembers && !errorMembers && filteredMembers.length === 0 && (
+                  <p className="text-center text-muted-foreground py-6">
+                      {searchTerm ? `No members found matching "${searchTerm}".` : "No members added yet."}
+                  </p>
+              )}
+          </CardContent>
+      </Card>
+
 
       <Card className="shadow-lg">
         <CardHeader>
@@ -598,7 +740,35 @@ export default function IncomePage() {
         onSave={handleSaveEditedIncome}
         currentUser={authUser}
         incomeAccounts={incomeAccounts}
+        members={members}
       />
+
+       {/* Add/Edit Member Dialog */}
+      <Dialog open={isMemberDialogOpen} onOpenChange={setIsMemberDialogOpen}>
+          <DialogContent>
+              <DialogHeader>
+                  <DialogTitle>{editingMember ? 'Edit Member' : 'Add New Member'}</DialogTitle>
+                  <DialogDescription>
+                      {editingMember ? `Update the name for "${editingMember.fullName}".` : 'Add a new member to the church records.'}
+                  </DialogDescription>
+              </DialogHeader>
+              <Form {...memberForm}>
+                  <form onSubmit={memberForm.handleSubmit(handleMemberSubmit)} className="space-y-4 py-4">
+                       <FormField control={memberForm.control} name="fullName" render={({ field }) => (
+                          <FormItem><FormLabel>Member Full Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                      )} />
+                       <DialogFooter>
+                          <DialogClose asChild><Button type="button" variant="outline" disabled={isSubmittingMember}>Cancel</Button></DialogClose>
+                          <Button type="submit" disabled={isSubmittingMember}>
+                              {isSubmittingMember ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Save
+                          </Button>
+                      </DialogFooter>
+                  </form>
+              </Form>
+          </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+    
