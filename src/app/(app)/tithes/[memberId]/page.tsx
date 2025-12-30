@@ -43,7 +43,7 @@ export default function MemberTitheDetailsPage() {
     const params = useParams();
     const memberId = params.memberId as string;
     const { toast } = useToast();
-    const [authUser, authLoading] = useAuthState(auth);
+    const [authUser, authLoading, authError] = useAuthState(auth);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editingRecord, setEditingRecord] = useState<TitheRecord | null>(null);
