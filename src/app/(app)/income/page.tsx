@@ -18,6 +18,7 @@ import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import type { IncomeRecord, IncomeCategory, IncomeRecordFirestore, Account, AccountFirestore, IncomeFormValues as EditIncomeFormValues } from '@/types';
+import { incomeSchema } from '@/types';
 import { addIncomeRecord, deleteIncomeRecord, updateIncomeRecord } from '@/services/incomeService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
@@ -27,18 +28,6 @@ import { collection, query, orderBy, Timestamp, where, type DocumentData, type Q
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { User } from 'firebase/auth';
 
-const incomeSchema = z.object({
-  date: z.date({ required_error: "Date is required." }),
-  category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
-  amount: z.coerce.number().positive({ message: "Amount must be positive." }),
-  accountId: z.string().min(1, { message: "Account is required." }),
-  description: z.string().optional(),
-  memberName: z.string().optional(),
-}).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
-  message: "Member name is required for tithes.",
-  path: ["memberName"],
-});
-
 type IncomeFormValues = z.infer<typeof incomeSchema>;
 
 const incomeConverter = {
@@ -46,6 +35,7 @@ const incomeConverter = {
     const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
+      code: data.code,
       date: (data.date as Timestamp).toDate(),
       category: data.category,
       amount: data.amount,
@@ -92,6 +82,7 @@ const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChang
   React.useEffect(() => {
     if (record && isOpen) {
       editForm.reset({
+        code: record.code,
         date: record.date,
         category: record.category,
         amount: record.amount,
@@ -131,6 +122,19 @@ const EditIncomeDialog: React.FC<EditIncomeDialogProps> = ({ isOpen, onOpenChang
         </DialogHeader>
         <Form {...editForm}>
           <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <FormField
+                control={editForm.control}
+                name="code"
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel>Transaction Code</FormLabel>
+                    <FormControl>
+                    <Input placeholder="e.g., 10011" {...field} disabled={isSaving}/>
+                    </FormControl>
+                    <FormMessage />
+                </FormItem>
+                )}
+            />
             <FormField
               control={editForm.control}
               name="date"
@@ -268,6 +272,7 @@ export default function IncomePage() {
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeSchema),
     defaultValues: {
+      code: "",
       date: new Date(),
       category: undefined,
       amount: 0,
@@ -296,7 +301,7 @@ export default function IncomePage() {
         authUser.uid,
         authUser.email
       );
-      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
+      form.reset({ code: "", date: new Date(), category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
       toast({ title: "Success", description: "Income record saved successfully." });
     } catch (err) {
       console.error(err);
@@ -381,6 +386,19 @@ export default function IncomePage() {
                 <div className="grid md:grid-cols-3 gap-6">
                   <FormField
                     control={form.control}
+                    name="code"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Transaction Code</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g., 10011" {...field} disabled={form.formState.isSubmitting}/>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="date"
                     render={({ field }) => (
                       <FormItem className="flex flex-col">
@@ -435,22 +453,22 @@ export default function IncomePage() {
                       </FormItem>
                     )}
                   />
-                  <FormField
-                    control={form.control}
-                    name="amount"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Amount (XAF)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </div>
                 
-                 <div className="grid md:grid-cols-2 gap-6">
+                 <div className="grid md:grid-cols-3 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="amount"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Amount (XAF)</FormLabel>
+                          <FormControl>
+                            <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                     <FormField
                         control={form.control}
                         name="accountId"
@@ -533,6 +551,7 @@ export default function IncomePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Code</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
@@ -547,6 +566,7 @@ export default function IncomePage() {
                       const account = incomeAccounts?.find(a => a.id === record.accountId);
                       return (
                           <TableRow key={record.id}>
+                              <TableCell>{record.code}</TableCell>
                               <TableCell>{format(record.date, "PP")}</TableCell>
                               <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
                               <TableCell>{record.category}</TableCell>
@@ -582,5 +602,3 @@ export default function IncomePage() {
     </div>
   );
 }
-
-    

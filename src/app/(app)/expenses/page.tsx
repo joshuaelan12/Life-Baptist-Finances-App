@@ -32,6 +32,7 @@ const expenseConverter = {
     const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
+      code: data.code,
       date: (data.date as Timestamp).toDate(),
       category: data.category,
       amount: data.amount,
@@ -76,6 +77,7 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
   React.useEffect(() => {
     if (record && isOpen) {
       editForm.reset({
+        code: record.code,
         date: record.date,
         category: record.category,
         amount: record.amount,
@@ -86,6 +88,7 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
       });
     } else if (!isOpen) {
       editForm.reset({
+        code: "",
         date: new Date(),
         category: undefined,
         amount: 0,
@@ -126,6 +129,19 @@ const EditExpenseDialog: React.FC<EditExpenseDialogProps> = ({ isOpen, onOpenCha
         </DialogHeader>
         <Form {...editForm}>
           <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+            <FormField
+                control={editForm.control}
+                name="code"
+                render={({ field }) => (
+                <FormItem>
+                    <FormLabel>Transaction Code</FormLabel>
+                    <FormControl>
+                    <Input placeholder="e.g., 10011" {...field} disabled={isSaving}/>
+                    </FormControl>
+                    <FormMessage />
+                </FormItem>
+                )}
+            />
             <FormField
               control={editForm.control}
               name="date"
@@ -290,6 +306,7 @@ export default function ExpensesPage() {
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseSchema),
     defaultValues: {
+      code: "",
       date: new Date(),
       category: undefined,
       amount: 0,
@@ -314,7 +331,7 @@ export default function ExpensesPage() {
     }
     try {
       await addExpenseRecord(data, authUser.uid, authUser.email);
-      form.reset({ date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "", accountId: "" });
+      form.reset({ code: "", date: new Date(), category: undefined, amount: 0, description: "", payee: "", paymentMethod: "", accountId: "" });
       toast({ title: "Success", description: "Expense record saved successfully." });
     } catch (err) {
       console.error(err);
@@ -411,6 +428,19 @@ export default function ExpensesPage() {
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <FormField
                     control={form.control}
+                    name="code"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Transaction Code</FormLabel>
+                        <FormControl>
+                          <Input placeholder="e.g., 10011" {...field} disabled={form.formState.isSubmitting}/>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
                     name="date"
                     render={({ field }) => (
                       <FormItem className="flex flex-col">
@@ -462,6 +492,8 @@ export default function ExpensesPage() {
                         </FormItem>
                         )}
                     />
+                </div>
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <FormField
                     control={form.control}
                     name="category"
@@ -484,8 +516,6 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
-                </div>
-                 <div className="grid md:grid-cols-3 gap-6">
                    <FormField
                     control={form.control}
                     name="amount"
@@ -512,6 +542,8 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
+                </div>
+                 <div className="grid md:grid-cols-2 gap-6">
                   <FormField
                     control={form.control}
                     name="paymentMethod"
@@ -536,20 +568,20 @@ export default function ExpensesPage() {
                       </FormItem>
                     )}
                   />
+                  <FormField
+                    control={form.control}
+                    name="description"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Description (Optional)</FormLabel>
+                        <FormControl>
+                          <Textarea placeholder="E.g., Electricity bill for March, Offering for guest speaker" {...field} disabled={form.formState.isSubmitting}/>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
-                <FormField
-                  control={form.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Description (Optional)</FormLabel>
-                      <FormControl>
-                        <Textarea placeholder="E.g., Electricity bill for March, Offering for guest speaker" {...field} disabled={form.formState.isSubmitting}/>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
 
                 <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !authUser}>
                   {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
@@ -571,6 +603,7 @@ export default function ExpensesPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Code</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
@@ -586,6 +619,7 @@ export default function ExpensesPage() {
                       const account = expenseAccounts?.find(a => a.id === record.accountId);
                       return (
                         <TableRow key={record.id}>
+                          <TableCell>{record.code}</TableCell>
                           <TableCell>{format(record.date, "PP")}</TableCell>
                           <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
                           <TableCell>{record.category}</TableCell>
@@ -624,5 +658,3 @@ export default function ExpensesPage() {
     </div>
   );
 }
-
-    

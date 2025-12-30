@@ -37,7 +37,7 @@ export const addExpenseRecord = async (
     await logActivity(userId, userEmail, "CREATE_EXPENSE_RECORD", {
       recordId: docRef.id,
       collectionName: EXPENSES_COLLECTION,
-      extraInfo: `Amount: ${recordData.amount}, Category: ${recordData.category}`
+      extraInfo: `Code: ${recordData.code}, Amount: ${recordData.amount}, Category: ${recordData.category}`
     });
     return docRef.id;
   } catch (error) {

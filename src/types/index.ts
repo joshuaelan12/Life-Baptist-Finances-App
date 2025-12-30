@@ -15,6 +15,7 @@ export type IncomeCategory = "Offering" | "Tithe" | "Donation" | "Other";
 
 // Schema for the income form (used for both creation and editing)
 export const incomeSchema = z.object({
+  code: z.string().min(1, { message: "Transaction code is required." }),
   date: z.date({ required_error: "Date is required." }),
   category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
@@ -32,6 +33,7 @@ export type IncomeFormValues = z.infer<typeof incomeSchema>;
 // For data coming from Firestore
 export interface IncomeRecordFirestore {
   id: string;
+  code: string;
   date: Timestamp; // Firestore Timestamp
   category: IncomeCategory;
   amount: number;
@@ -45,6 +47,7 @@ export interface IncomeRecordFirestore {
 // For client-side form and display
 export interface IncomeRecord {
   id: string;
+  code: string;
   date: Date; // JavaScript Date object
   category: IncomeCategory;
   amount: number;
@@ -103,6 +106,7 @@ export const expenseCategories: ExpenseCategory[] = [
 
 // For Expense Page Form validation
 export const expenseSchema = z.object({
+  code: z.string().min(1, { message: "Transaction code is required." }),
   date: z.date({ required_error: "Date is required." }),
   category: z.enum(expenseCategories as [ExpenseCategory, ...ExpenseCategory[]], { required_error: "Category is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
@@ -117,6 +121,7 @@ export type ExpenseFormValues = z.infer<typeof expenseSchema>;
 // For data stored in Firestore
 export interface ExpenseRecordFirestore {
   id: string;
+  code: string;
   date: Timestamp;
   category: ExpenseCategory;
   amount: number;
@@ -131,6 +136,7 @@ export interface ExpenseRecordFirestore {
 // For client-side display and manipulation
 export interface ExpenseRecord {
   id: string;
+  code: string;
   date: Date;
   category: ExpenseCategory;
   amount: number;
@@ -250,5 +256,3 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
-
-    
