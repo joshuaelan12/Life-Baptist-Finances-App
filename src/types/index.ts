@@ -16,6 +16,7 @@ export type IncomeCategory = "Offering" | "Tithe" | "Donation" | "Other";
 // Schema for the income form (used for both creation and editing)
 export const incomeSchema = z.object({
   code: z.string().min(1, { message: "Transaction code is required." }),
+  transactionName: z.string().min(1, { message: "Transaction name is required." }),
   date: z.date({ required_error: "Date is required." }),
   category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
@@ -34,6 +35,7 @@ export type IncomeFormValues = z.infer<typeof incomeSchema>;
 export interface IncomeRecordFirestore {
   id: string;
   code: string;
+  transactionName: string;
   date: Timestamp; // Firestore Timestamp
   category: IncomeCategory;
   amount: number;
@@ -48,6 +50,7 @@ export interface IncomeRecordFirestore {
 export interface IncomeRecord {
   id: string;
   code: string;
+  transactionName: string;
   date: Date; // JavaScript Date object
   category: IncomeCategory;
   amount: number;

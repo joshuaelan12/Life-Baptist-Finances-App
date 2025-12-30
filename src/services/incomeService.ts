@@ -39,7 +39,7 @@ export const addIncomeRecord = async (
     await logActivity(userId, userEmail, "CREATE_INCOME_RECORD", {
       recordId: docRef.id,
       collectionName: INCOME_COLLECTION,
-      extraInfo: `Code: ${recordData.code}, Amount: ${recordData.amount}, Category: ${recordData.category}`
+      extraInfo: `Code: ${recordData.code}, Name: ${recordData.transactionName}, Amount: ${recordData.amount}, Category: ${recordData.category}`
     });
 
     return docRef.id;
@@ -96,3 +96,5 @@ export const deleteIncomeRecord = async (
     throw new Error("Failed to delete income record.");
   }
 };
+
+    
