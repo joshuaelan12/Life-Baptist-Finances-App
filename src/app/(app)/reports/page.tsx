@@ -18,7 +18,7 @@ import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions, where } from 'firebase/firestore';
-import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore, Member } from '@/types';
+import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore, Account, AccountFirestore, IncomeSource, ExpenseSource } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
@@ -31,16 +31,8 @@ const incomeConverter = {
     const data = snapshot.data(options) as Omit<IncomeRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
-      code: data.code,
+      ...data,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      category: data.category,
-      amount: data.amount,
-      description: data.description,
-      transactionName: data.transactionName,
-      memberName: data.memberName,
-      recordedByUserId: data.recordedByUserId,
-      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
-      accountId: data.accountId,
     };
   }
 };
@@ -50,13 +42,8 @@ const expenseConverter = {
     const data = snapshot.data(options) as Omit<ExpenseRecordFirestore, 'id'>;
     return {
       id: snapshot.id,
-      code: data.code,
-      expenseName: data.expenseName,
+      ...data,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
-      category: data.category, amount: data.amount, description: data.description,
-      payee: data.payee, paymentMethod: data.paymentMethod, recordedByUserId: data.recordedByUserId,
-      createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
-      accountId: data.accountId,
     };
   }
 };
@@ -71,6 +58,30 @@ const accountConverter = {
         } as Account;
     },
     toFirestore: (account: Account) => account,
+};
+
+const incomeSourceConverter = {
+    fromFirestore: (snapshot: any): IncomeSource => {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as IncomeSource;
+    },
+    toFirestore: (source: IncomeSource) => source,
+};
+
+const expenseSourceConverter = {
+    fromFirestore: (snapshot: any): ExpenseSource => {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as ExpenseSource;
+    },
+    toFirestore: (source: ExpenseSource) => source,
 };
 
 
@@ -92,6 +103,8 @@ export default function ReportsPage() {
   const [incomeRecords, loadingIncome] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
   const [expenseRecords, loadingExpenses] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
   const [accounts, loadingAccounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
+  const [incomeSources, loadingIncomeSources] = useCollectionData(collection(db, 'income_sources').withConverter(incomeSourceConverter));
+  const [expenseSources, loadingExpenseSources] = useCollectionData(collection(db, 'expense_sources').withConverter(expenseSourceConverter));
   const [members, loadingMembers] = useCollectionData(collection(db, 'members'));
   
   const accountsMap = useMemo(() => {
@@ -148,6 +161,8 @@ export default function ReportsPage() {
           periodString, 
           incomeRecords: incomeRecords || [], 
           expenseRecords: expenseRecords || [],
+          incomeSources: incomeSources || [],
+          expenseSources: expenseSources || [],
           startDate,
           endDate,
       };
@@ -226,7 +241,7 @@ export default function ReportsPage() {
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
 
-  if (authLoading || loadingAccounts || loadingIncome || loadingExpenses || loadingMembers) {
+  if (authLoading || loadingAccounts || loadingIncome || loadingExpenses || loadingMembers || loadingIncomeSources || loadingExpenseSources) {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
   if (authError) {
@@ -461,3 +476,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
