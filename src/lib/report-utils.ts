@@ -261,29 +261,6 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                                  { content: formatCurrency(sourceRealized), styles: { halign: 'right' } },
                                  { content: `${sourcePercentage.toFixed(1)}%`, styles: { halign: 'right' } }
                              ]);
-
-                             // Add sub-table for transactions
-                             if (records.length > 0) {
-                                 const subTableBody = records.map(tx => [
-                                     format(tx.date, 'dd/MM/yy'),
-                                     (tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName,
-                                     ('memberName' in tx && tx.memberName) ? tx.memberName : ('payee' in tx && tx.payee) ? tx.payee : '',
-                                     formatCurrency(tx.amount)
-                                 ]);
-                                 const subTable = {
-                                     head: [['Date', 'Description', 'Member/Payee', 'Amount']],
-                                     body: subTableBody,
-                                     theme: 'grid' as const,
-                                     styles: { fontSize: 8, cellPadding: 2, lineWidth: 0.1 },
-                                     headStyles: { fillColor: '#F7F2ED', textColor: '#2A4035', fontStyle: 'bold' as const, lineWidth: 0.1 },
-                                     columnStyles: { 3: { halign: 'right' as const } }
-                                 };
-                                 body.push([{
-                                     content: '',
-                                     _subTable: subTable,
-                                     colSpan: 5
-                                 }]);
-                             }
                          });
                      });
                  }
@@ -378,15 +355,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
             }
 
             if (row[0]?._subTable) {
-                const subTableData = row[0]._subTable;
-                doc.autoTable({
-                    ...subTableData,
-                    startY: finalY + 2,
-                    margin: { left: 45 },
-                    tableWidth: pageWidth - 80,
-                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
-                });
-                finalY = (doc as any).lastAutoTable.finalY;
+                // This block is now unused as per the user request to simplify the report
             } else if (row[0]?.colSpan === 5) { // Section header
                 doc.autoTable({
                     body: [row],
