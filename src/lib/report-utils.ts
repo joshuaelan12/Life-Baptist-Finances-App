@@ -66,7 +66,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
                 const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
-                    const sourceBudget = source.budgets?.[budgetYear || ''] || 0;
+                    const sourceBudget = source.budgets?.[budgetYear || ''] || (source.budget || 0); // fallback for old data
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
                     const sourceRealized = records.reduce((sum, r) => sum + r.amount, 0);
                     const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
@@ -247,7 +247,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
 
                          sources.forEach(source => {
-                             const sourceBudget = source.budgets?.[options.budgetYear || ''] || 0;
+                             const sourceBudget = source.budgets?.[options.budgetYear || ''] || (source.budget || 0); // Fallback for old budget field
                              const records = type === 'Income' 
                                  ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) 
                                  : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
@@ -295,7 +295,8 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     const pageWidth = doc.internal.pageSize.getWidth();
 
     // Add Header
-    const addHeader = () => {
+    const addHeader = (pageNumber: number) => {
+        if (pageNumber > 1) return;
         doc.setFontSize(20);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor('#2A4035'); // --foreground color
@@ -325,13 +326,10 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     const isHierarchicalReport = reportType === 'budget_vs_actuals' || reportType === 'balance_sheet';
 
     if (isHierarchicalReport) {
-        addHeader();
-        let startY = 80;
-        
         doc.autoTable({
             head: headers,
-            body: [], // Empty body, we render manually
-            startY: startY,
+            body: body,
+            startY: 80,
             theme: 'striped',
             headStyles: { 
                 fillColor: '#346F4F', // --primary
@@ -339,51 +337,19 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
                 fontSize: 10,
                 fontStyle: 'bold',
             },
-            // This is just to draw the header
+            styles: { 
+                fontSize: 9, 
+                cellPadding: 4,
+                lineWidth: 0.2,
+                lineColor: '#DCD0C3' // --border
+            },
+            alternateRowStyles: { fillColor: '#FFFFFF' }, // No alternate color for this complex report
             didDrawPage: (data) => {
-                if (data.pageNumber === 1) addHeader();
-            }
-        });
-
-        let finalY = (doc as any).lastAutoTable.finalY;
-
-        body.forEach(row => {
-            if (finalY > doc.internal.pageSize.getHeight() - 100) {
-                doc.addPage();
-                finalY = 40;
-                addHeader();
-            }
-
-            if (row[0]?._subTable) {
-                // This block is now unused as per the user request to simplify the report
-            } else if (row[0]?.colSpan === 5) { // Section header
-                doc.autoTable({
-                    body: [row],
-                    startY: finalY + 5,
-                    theme: 'plain',
-                    styles: { fontSize: 11, fontStyle: 'bold' },
-                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
-                });
-                finalY = (doc as any).lastAutoTable.finalY;
-            } else { // Regular main table row
-                doc.autoTable({
-                    body: [row],
-                    startY: finalY,
-                    theme: 'grid',
-                    styles: { 
-                        fontSize: 9, 
-                        cellPadding: 4,
-                        lineWidth: 0.2,
-                        lineColor: '#DCD0C3' // --border
-                    },
-                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
-                });
-                finalY = (doc as any).lastAutoTable.finalY;
-            }
+                addHeader(data.pageNumber);
+            },
         });
 
     } else { // Standard reports
-        addHeader();
         doc.autoTable({
             head: headers,
             body: body.filter(row => !row[0]?._subTable),
@@ -397,7 +363,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
             styles: { fontSize: 9, cellPadding: 4 },
             alternateRowStyles: { fillColor: '#FAF5F0' }, // --popover
             didDrawPage: (data) => {
-                if (data.pageNumber === 1) addHeader();
+                addHeader(data.pageNumber);
             }
         });
         
