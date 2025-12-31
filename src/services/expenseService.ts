@@ -9,15 +9,21 @@ import {
   updateDoc,
   serverTimestamp,
   type DocumentData,
+  writeBatch,
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { ExpenseSourceFormValues } from '@/types';
 import { logActivity } from './activityLogService';
 
 const EXPENSES_SOURCES_COLLECTION = 'expense_sources';
+const EXPENSE_RECORDS_COLLECTION = 'expense_records';
 
 export const addExpenseSource = async (
-  sourceData: ExpenseSourceFormValues,
+  sourceData: Omit<ExpenseSourceFormValues, 'budget'>,
+  budgets: Record<string, number>,
   userId: string,
   userEmail: string
 ): Promise<string> => {
@@ -27,6 +33,7 @@ export const addExpenseSource = async (
   try {
     const docRef = await addDoc(collection(db, EXPENSES_SOURCES_COLLECTION), {
       ...sourceData,
+      budgets,
       recordedByUserId: userId,
       createdAt: serverTimestamp(),
     });
@@ -34,7 +41,7 @@ export const addExpenseSource = async (
     await logActivity(userId, userEmail, "CREATE_EXPENSE_SOURCE", {
       recordId: docRef.id,
       collectionName: EXPENSES_SOURCES_COLLECTION,
-      extraInfo: `Name: ${sourceData.expenseName}, Budget: ${sourceData.budget}`
+      extraInfo: `Name: ${sourceData.expenseName}, Initial Budget: ${JSON.stringify(budgets)}`
     });
     return docRef.id;
   } catch (error) {
@@ -45,7 +52,7 @@ export const addExpenseSource = async (
 
 export const updateExpenseSource = async (
   sourceId: string,
-  dataToUpdate: Partial<ExpenseSourceFormValues>,
+  dataToUpdate: Partial<ExpenseSourceFormValues & { budgets: Record<string, number> | null, budget: number | null }>,
   userId: string,
   userEmail: string
 ): Promise<void> => {
@@ -54,7 +61,13 @@ export const updateExpenseSource = async (
   }
   try {
     const recordRef = doc(db, EXPENSES_SOURCES_COLLECTION, sourceId);
-    await updateDoc(recordRef, dataToUpdate as DocumentData);
+    
+    // The `budget` field from the form is for validation and initial creation only.
+    // We remove it here to avoid saving it to Firestore during updates.
+    // The actual budget values are in the `budgets` map.
+    const { budget, ...updatePayload } = dataToUpdate;
+
+    await updateDoc(recordRef, updatePayload as DocumentData);
 
     await logActivity(userId, userEmail, "UPDATE_EXPENSE_SOURCE", {
       recordId: sourceId,
@@ -75,17 +88,32 @@ export const deleteExpenseSource = async (
    if (!userId) {
     throw new Error('User ID is required to delete an expense source.');
   }
+  const batch = writeBatch(db);
+  
   try {
-    // TODO: Add logic to check for and possibly delete related transactions
-    await deleteDoc(doc(db, EXPENSES_SOURCES_COLLECTION, sourceId));
+    // 1. Find all transactions related to this source
+    const transactionsQuery = query(collection(db, EXPENSE_RECORDS_COLLECTION), where('expenseSourceId', '==', sourceId));
+    const transactionsSnapshot = await getDocs(transactionsQuery);
+    
+    // 2. Add delete operations for each transaction to the batch
+    transactionsSnapshot.forEach(transactionDoc => {
+        batch.delete(transactionDoc.ref);
+    });
+
+    // 3. Add the delete operation for the source itself to the batch
+    const sourceRef = doc(db, EXPENSES_SOURCES_COLLECTION, sourceId);
+    batch.delete(sourceRef);
+
+    // 4. Commit the batch
+    await batch.commit();
+
     await logActivity(userId, userEmail, "DELETE_EXPENSE_SOURCE", {
       recordId: sourceId,
-      collectionName: EXPENSES_SOURCES_COLLECTION
+      collectionName: EXPENSES_SOURCES_COLLECTION,
+      extraInfo: `Deleted source and ${transactionsSnapshot.size} associated transactions.`
     });
   } catch (error) {
-    console.error('Error deleting expense source: ', error);
-    throw new Error("Failed to delete expense source.");
+    console.error('Error deleting expense source and its transactions: ', error);
+    throw new Error("Failed to delete expense source. It may be in use in other records.");
   }
 };
-
-    

@@ -9,39 +9,47 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PlusCircle, Trash2, Loader2, AlertTriangle, ReceiptText, Edit } from "lucide-react";
+import { PlusCircle, Trash2, Loader2, AlertTriangle, ReceiptText, Edit, Coins } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import type { ExpenseSource, ExpenseSourceFormValues, ExpenseCategory, ExpenseSourceFirestore, Account, AccountFirestore } from '@/types';
+import type { ExpenseSource, ExpenseSourceFormValues, ExpenseCategory, ExpenseSourceFirestore, Account, AccountFirestore, ExpenseRecord } from '@/types';
 import { expenseSourceSchema, expenseCategories } from '@/types';
 import { addExpenseSource, updateExpenseSource, deleteExpenseSource } from '@/services/expenseService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { useCollectionData } from 'react-firebase-hooks/firestore';
+import { useCollection, useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, where, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import type { User } from 'firebase/auth';
+import { Label } from '@/components/ui/label';
 
 const expenseSourceConverter = {
   fromFirestore: (snapshot: QueryDocumentSnapshot, options: SnapshotOptions): ExpenseSource => {
     const data = snapshot.data(options) as Omit<ExpenseSourceFirestore, 'id'>;
     return {
       id: snapshot.id,
-      code: data.code,
-      expenseName: data.expenseName,
-      category: data.category,
-      accountId: data.accountId,
-      description: data.description,
-      budget: data.budget,
+      ...data,
       createdAt: (data.createdAt as Timestamp)?.toDate(),
-      recordedByUserId: data.recordedByUserId,
     };
   }
 };
+
+const expenseRecordConverter = {
+    fromFirestore: (snapshot: any): ExpenseRecord => {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            ...data,
+            date: (data.date as Timestamp).toDate(),
+        } as ExpenseRecord;
+    },
+    toFirestore: (record: ExpenseRecord) => record,
+}
+
 
 const accountConverter = {
     fromFirestore: (snapshot: any, options: any): Account => {
@@ -55,113 +63,14 @@ const accountConverter = {
     toFirestore: (account: Account) => account,
 };
 
-
-interface EditExpenseSourceDialogProps {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  source: ExpenseSource | null;
-  onSave: (updatedData: Partial<ExpenseSourceFormValues>, sourceId: string) => Promise<void>;
-  currentUser: User | null;
-  expenseAccounts: Account[] | undefined;
-}
-
-const EditExpenseSourceDialog: React.FC<EditExpenseSourceDialogProps> = ({ isOpen, onOpenChange, source, onSave, currentUser, expenseAccounts }) => {
-  const [isSaving, setIsSaving] = useState(false);
-  const { toast } = useToast();
-  
-  const editForm = useForm<ExpenseSourceFormValues>({
-    resolver: zodResolver(expenseSourceSchema),
-  });
-
-  React.useEffect(() => {
-    if (source && isOpen) {
-      editForm.reset({
-        code: source.code,
-        expenseName: source.expenseName,
-        category: source.category,
-        budget: source.budget || 0,
-        accountId: source.accountId || "",
-        description: source.description || "",
-      });
-    }
-  }, [source, isOpen, editForm]);
-
-  const handleEditSubmit = async (data: ExpenseSourceFormValues) => {
-    if (!source || !currentUser?.uid) {
-      toast({ variant: "destructive", title: "Error", description: "Cannot save. Record or user information is missing." });
-      return;
-    }
-    setIsSaving(true);
-    try {
-      await onSave(data, source.id);
-      onOpenChange(false);
-    } catch (error) {
-      // Error toast is handled by onSave caller
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  if (!source) return null;
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Edit Expense Source</DialogTitle>
-          <DialogDescription>
-            Update the details for this expense source.
-          </DialogDescription>
-        </DialogHeader>
-        <Form {...editForm}>
-          <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-             <FormField control={editForm.control} name="code" render={({ field }) => (
-                <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
-            )}/>
-             <FormField control={editForm.control} name="expenseName" render={({ field }) => (
-                <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
-            )}/>
-             <FormField control={editForm.control} name="category" render={({ field }) => (
-                <FormItem><FormLabel>Category</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                        <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
-                        <SelectContent>{expenseCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent>
-                    </Select>
-                <FormMessage /></FormItem>
-            )}/>
-             <FormField control={editForm.control} name="accountId" render={({ field }) => (
-                <FormItem><FormLabel>Account</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
-                        <FormControl><SelectTrigger><SelectValue placeholder="Select an expense account" /></SelectTrigger></FormControl>
-                        <SelectContent>{expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
-                    </Select>
-                <FormMessage /></FormItem>
-            )}/>
-             <FormField control={editForm.control} name="budget" render={({ field }) => (
-                <FormItem><FormLabel>Annual Budget (XAF)</FormLabel><FormControl><Input type="number" {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
-            )}/>
-             <FormField control={editForm.control} name="description" render={({ field }) => (
-                <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
-            )}/>
-            <DialogFooter className="pt-4">
-              <DialogClose asChild><Button type="button" variant="outline" disabled={isSaving}>Cancel</Button></DialogClose>
-              <Button type="submit" disabled={isSaving || !currentUser}>
-                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save Changes
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
-  )
-};
-
-
 export default function ExpensesPage() {
   const { toast } = useToast();
-  const [authUser, authLoading, authError] = useAuthState(auth);
+  const [authUser, authLoading] = useAuthState(auth);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingSource, setEditingSource] = useState<ExpenseSource | null>(null);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const form = useForm<ExpenseSourceFormValues>({
     resolver: zodResolver(expenseSourceSchema),
@@ -175,11 +84,31 @@ export default function ExpensesPage() {
     },
   });
 
+  const budgetForm = useForm<{ budget: number }>({
+      resolver: zodResolver(z.object({ budget: z.coerce.number().min(0, "Budget must be zero or more.") })),
+  });
+
   const expenseSourcesQuery = useMemo(() => authUser ? query(collection(db, 'expense_sources'), orderBy('expenseName')).withConverter(expenseSourceConverter) : null, [authUser]);
   const [expenseSources, loadingSources, errorSources] = useCollectionData(expenseSourcesQuery);
+
+  const expenseRecordsQuery = useMemo(() => authUser ? collection(db, 'expense_records').withConverter(expenseRecordConverter) : null, [authUser]);
+  const [expenseRecords, loadingRecords, errorRecords] = useCollectionData(expenseRecordsQuery);
   
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Expense'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [expenseAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
+  
+  const realizedAmounts = useMemo(() => {
+    if (!expenseRecords) return {};
+    const yearStart = new Date(selectedYear, 0, 1);
+    const yearEnd = new Date(selectedYear, 11, 31, 23, 59, 59);
+    const amounts: Record<string, number> = {};
+    for (const record of expenseRecords) {
+        if (record.expenseSourceId && record.date >= yearStart && record.date <= yearEnd) {
+            amounts[record.expenseSourceId] = (amounts[record.expenseSourceId] || 0) + record.amount;
+        }
+    }
+    return amounts;
+  }, [expenseRecords, selectedYear]);
 
 
   const onSubmit = async (data: ExpenseSourceFormValues) => {
@@ -187,13 +116,17 @@ export default function ExpensesPage() {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to add expenses." });
       return;
     }
+    setIsSubmitting(true);
     try {
-      await addExpenseSource(data, authUser.uid, authUser.email);
+      const budgetForYear = { [selectedYear]: data.budget || 0 };
+      await addExpenseSource(data, budgetForYear, authUser.uid, authUser.email);
       form.reset({ code: "", expenseName: "", category: undefined, budget: 0, description: "", accountId: "" });
       toast({ title: "Success", description: "Expense source created successfully." });
     } catch (err) {
       console.error(err);
       toast({ variant: "destructive", title: "Error", description: "Failed to create expense source." });
+    } finally {
+        setIsSubmitting(false);
     }
   };
 
@@ -201,20 +134,53 @@ export default function ExpensesPage() {
     setEditingSource(source);
     setIsEditDialogOpen(true);
   };
+  
+  const handleOpenBudgetDialog = (source: ExpenseSource) => {
+    setEditingSource(source);
+    // Handle both old and new data models
+    const budgetForSelectedYear = source.budgets?.[selectedYear] || (selectedYear === 2025 ? source.budget : 0) || 0;
+    budgetForm.reset({ budget: budgetForSelectedYear });
+    setIsBudgetDialogOpen(true);
+  };
 
   const handleSaveEditedSource = async (updatedData: Partial<ExpenseSourceFormValues>, sourceId: string) => {
-    if (!authUser?.uid || !authUser.email) {
+    if (!authUser?.uid || !authUser.email || !editingSource) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to update." });
       throw new Error("User not authenticated");
     }
     try {
-      await updateExpenseSource(sourceId, updatedData, authUser.uid, authUser.email);
+      // For editing, we don't update the budget here, only core info.
+      // The budget is handled by the dedicated budget dialog.
+      const { budget, ...coreData } = updatedData;
+      await updateExpenseSource(sourceId, coreData, authUser.uid, authUser.email);
       toast({ title: "Expense Source Updated", description: `${updatedData.expenseName} has been updated.`});
-      setEditingSource(null);
     } catch (err) {
         console.error(err);
         toast({ variant: "destructive", title: "Error", description: "Failed to update expense source." });
         throw err;
+    }
+  };
+
+  const handleSetBudget = async (data: { budget: number }) => {
+    if (!authUser || !editingSource) return;
+    setIsSubmitting(true);
+    try {
+        // "Smart Upgrade" logic: if we have an old budget and no new map, migrate it.
+        const currentBudgets = editingSource.budgets || {};
+        if (!editingSource.budgets && editingSource.budget) {
+            currentBudgets[2025] = editingSource.budget; // Assume old budget was for 2025
+        }
+        
+        const updatedBudgets = { ...currentBudgets, [selectedYear]: data.budget };
+
+        await updateExpenseSource(editingSource.id, { budgets: updatedBudgets, budget: null }, authUser.uid, authUser.email);
+        toast({ title: "Success", description: `Budget for ${selectedYear} set successfully.` });
+        setIsBudgetDialogOpen(false);
+        setEditingSource(null);
+    } catch (error: any) {
+        toast({ variant: "destructive", title: "Error", description: error.message || "Failed to set budget." });
+    } finally {
+        setIsSubmitting(false);
     }
   };
   
@@ -233,11 +199,13 @@ export default function ExpensesPage() {
   };
 
   const formatCurrency = (value: number) => {
-    return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
+    return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
   };
+
+  const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
   
-  const isLoading = authLoading || loadingSources || loadingAccounts;
-  const dataError = authError || errorSources || errorAccounts;
+  const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords;
+  const dataError = authError || errorSources || errorAccounts || errorRecords;
 
   if (isLoading) {
     return (
@@ -270,7 +238,7 @@ export default function ExpensesPage() {
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle>Create Budgeted Expense Item</CardTitle>
-          <CardDescription>Define a recurring expense item and set an annual budget for it.</CardDescription>
+          <CardDescription>Define a recurring expense item and set an initial budget for the selected year ({selectedYear}).</CardDescription>
         </CardHeader>
         <CardContent>
           {!authUser && (
@@ -284,108 +252,41 @@ export default function ExpensesPage() {
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="code"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Code</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g., 5001" {...field} disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="expenseName"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Expense Name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="e.g., Office Stationery" {...field} disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                    <FormField
-                        control={form.control}
-                        name="accountId"
-                        render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Account</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting}>
-                            <FormControl>
-                                <SelectTrigger>
-                                <SelectValue placeholder="Select an expense account" />
-                                </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                                {expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
-                            </SelectContent>
-                            </Select>
-                            <FormMessage />
-                        </FormItem>
-                        )}
-                    />
+                  <FormField control={form.control} name="code" render={({ field }) => (
+                      <FormItem><FormLabel>Code</FormLabel><FormControl><Input placeholder="e.g., 5001" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                  )}/>
+                  <FormField control={form.control} name="expenseName" render={({ field }) => (
+                      <FormItem><FormLabel>Expense Name</FormLabel><FormControl><Input placeholder="e.g., Office Stationery" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                  )}/>
+                  <FormField control={form.control} name="accountId" render={({ field }) => (
+                    <FormItem><FormLabel>Account</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select an expense account" /></SelectTrigger></FormControl>
+                        <SelectContent>{expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                    <FormMessage /></FormItem>
+                  )}/>
                 </div>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <FormField
-                    control={form.control}
-                    name="category"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Category</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value} disabled={form.formState.isSubmitting}>
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select expense category" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {expenseCategories.map(cat => (
-                               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                            ))}
-                          </SelectContent>
+                  <FormField control={form.control} name="category" render={({ field }) => (
+                      <FormItem><FormLabel>Category</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Select expense category" /></SelectTrigger></FormControl>
+                          <SelectContent>{expenseCategories.map(cat => (<SelectItem key={cat} value={cat}>{cat}</SelectItem>))}</SelectContent>
                         </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                   <FormField
-                    control={form.control}
-                    name="budget"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Annual Budget (XAF)</FormLabel>
-                        <FormControl>
-                          <Input type="number" placeholder="0.00" {...field} step="0.01" disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                      <FormMessage /></FormItem>
+                  )}/>
+                   <FormField control={form.control} name="budget" render={({ field }) => (
+                      <FormItem><FormLabel>Initial Budget for {selectedYear} (XAF)</FormLabel><FormControl><Input type="number" placeholder="0" {...field} step="0.01" disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                  )}/>
                 </div>
                  <div className="grid grid-cols-1">
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Description (Optional)</FormLabel>
-                        <FormControl>
-                          <Textarea placeholder="E.g., Yearly budget for all office supplies." {...field} disabled={form.formState.isSubmitting}/>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  <FormField control={form.control} name="description" render={({ field }) => (
+                      <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea placeholder="E.g., Yearly budget for all office supplies." {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                  )}/>
                 </div>
-
-                <Button type="submit" className="w-full md:w-auto" disabled={form.formState.isSubmitting || !authUser}>
-                  {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
+                <Button type="submit" className="w-full md:w-auto" disabled={isSubmitting || !authUser}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                    Create Expense Source
                 </Button>
               </form>
@@ -396,8 +297,19 @@ export default function ExpensesPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Budgeted Expense Items</CardTitle>
-          <CardDescription>Click on an item to view its transaction history and record new expenses.</CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>Budgeted Expense Items</CardTitle>
+              <CardDescription>Click an item to view transactions. Set budgets per year.</CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+                <Label htmlFor="year-select">Year:</Label>
+                <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
+                    <SelectTrigger className="w-[120px]" id="year-select"><SelectValue /></SelectTrigger>
+                    <SelectContent>{pastYearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent>
+                </Select>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
@@ -410,41 +322,36 @@ export default function ExpensesPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
-                    <TableHead>Annual Budget</TableHead>
+                    <TableHead>Budget ({selectedYear})</TableHead>
+                    <TableHead>Realized ({selectedYear})</TableHead>
+                    <TableHead>% Realized</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {expenseSources.map((source) => {
                       const account = expenseAccounts?.find(a => a.id === source.accountId);
+                      // "Smart Upgrade" read logic
+                      const budget = source.budgets?.[selectedYear] ?? (selectedYear === 2025 ? source.budget : 0) ?? 0;
+                      const realized = realizedAmounts[source.id] || 0;
+                      const percentage = budget > 0 ? (realized / budget) * 100 : 0;
                       return (
                         <TableRow key={source.id}>
                           <TableCell>{source.code}</TableCell>
-                          <TableCell>
-                            <Link href={`/expenses/${source.id}`} className="hover:underline text-primary font-medium">
-                                {source.expenseName}
-                            </Link>
-                          </TableCell>
+                          <TableCell><Link href={`/expenses/${source.id}`} className="hover:underline text-primary font-medium">{source.expenseName}</Link></TableCell>
                           <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
                           <TableCell>{source.category}</TableCell>
-                          <TableCell>{formatCurrency(source.budget || 0)}</TableCell>
+                          <TableCell>{formatCurrency(budget)}</TableCell>
+                          <TableCell>{formatCurrency(realized)}</TableCell>
+                          <TableCell>{percentage.toFixed(1)}%</TableCell>
                           <TableCell className="text-right space-x-1">
-                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense source">
-                                <Edit className="h-4 w-4" />
-                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenBudgetDialog(source)} aria-label="Set Budget"><Coins className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || isSubmitting} aria-label="Edit expense source"><Edit className="h-4 w-4" /></Button>
                             <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button variant="ghost" size="icon" aria-label="Delete expense source"><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                                </AlertDialogTrigger>
+                                <AlertDialogTrigger asChild><Button variant="ghost" size="icon" aria-label="Delete expense source"><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
                                 <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                        <AlertDialogDescription>This action will permanently delete the expense source "{source.expenseName}". This cannot be undone.</AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleDeleteRecord(source.id)}>Delete</AlertDialogAction>
-                                    </AlertDialogFooter>
+                                    <AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This action will permanently delete the expense source "{source.expenseName}" and all its transactions. This cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteRecord(source.id)}>Delete</AlertDialogAction></AlertDialogFooter>
                                 </AlertDialogContent>
                             </AlertDialog>
                           </TableCell>
@@ -460,16 +367,113 @@ export default function ExpensesPage() {
           )}
         </CardContent>
       </Card>
-      <EditExpenseSourceDialog
-        isOpen={isEditDialogOpen}
-        onOpenChange={setIsEditDialogOpen}
-        source={editingSource}
-        onSave={handleSaveEditedSource}
-        currentUser={authUser}
-        expenseAccounts={expenseAccounts}
-      />
+      
+      {/* Edit Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent>
+            <DialogHeader><DialogTitle>Edit Expense Source</DialogTitle><DialogDescription>Update the details for "{editingSource?.expenseName}". Budget is set separately.</DialogDescription></DialogHeader>
+            <EditExpenseSourceForm source={editingSource} onSave={handleSaveEditedSource} onFinished={() => setIsEditDialogOpen(false)} />
+        </DialogContent>
+      </Dialog>
+      
+      {/* Set Budget Dialog */}
+      <Dialog open={isBudgetDialogOpen} onOpenChange={setIsBudgetDialogOpen}>
+          <DialogContent>
+              <DialogHeader><DialogTitle>Set Budget for {selectedYear}</DialogTitle><DialogDescription>Enter the total budget for "{editingSource?.expenseName}" for the year {selectedYear}.</DialogDescription></DialogHeader>
+              <Form {...budgetForm}>
+                  <form onSubmit={budgetForm.handleSubmit(handleSetBudget)} className="space-y-4 py-4">
+                      <FormField control={budgetForm.control} name="budget" render={({ field }) => (
+                          <FormItem><FormLabel>Budget Amount (XAF)</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
+                      )} />
+                       <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button></DialogClose><Button type="submit" disabled={isSubmitting}>{isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Set Budget</Button></DialogFooter>
+                  </form>
+              </Form>
+          </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-    
+// Sub-component for the edit form
+interface EditExpenseSourceFormProps {
+  source: ExpenseSource | null;
+  onSave: (updatedData: Partial<ExpenseSourceFormValues>, sourceId: string) => Promise<void>;
+  onFinished: () => void;
+}
+
+const EditExpenseSourceForm: React.FC<EditExpenseSourceFormProps> = ({ source, onSave, onFinished }) => {
+    const [isSaving, setIsSaving] = useState(false);
+    const { toast } = useToast();
+    const accountsQuery = useMemo(() => query(collection(db, 'accounts'), where('type', '==', 'Expense'), orderBy('name')).withConverter(accountConverter), []);
+    const [expenseAccounts] = useCollectionData(accountsQuery);
+
+    const editForm = useForm<ExpenseSourceFormValues>({
+        resolver: zodResolver(expenseSourceSchema),
+    });
+
+    React.useEffect(() => {
+        if (source) {
+            editForm.reset({
+                code: source.code,
+                expenseName: source.expenseName,
+                category: source.category,
+                budget: source.budget || 0, // This is just for validation, not saved directly
+                accountId: source.accountId || "",
+                description: source.description || "",
+            });
+        }
+    }, [source, editForm]);
+
+    const handleEditSubmit = async (data: ExpenseSourceFormValues) => {
+        if (!source) return;
+        setIsSaving(true);
+        try {
+            await onSave(data, source.id);
+            onFinished();
+        } catch (error) {
+            // Error toast is handled by caller
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (!source) return null;
+
+    return (
+        <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(handleEditSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
+                <FormField control={editForm.control} name="code" render={({ field }) => (
+                    <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+                )}/>
+                <FormField control={editForm.control} name="expenseName" render={({ field }) => (
+                    <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} disabled={isSaving}/></FormControl><FormMessage /></FormItem>
+                )}/>
+                <FormField control={editForm.control} name="category" render={({ field }) => (
+                    <FormItem><FormLabel>Category</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                            <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                            <SelectContent>{expenseCategories.map(cat => <SelectItem key={cat} value={cat}>{cat}</SelectItem>)}</SelectContent>
+                        </Select>
+                    <FormMessage /></FormItem>
+                )}/>
+                <FormField control={editForm.control} name="accountId" render={({ field }) => (
+                    <FormItem><FormLabel>Account</FormLabel>
+                        <Select onValueChange={field.onChange} value={field.value} disabled={isSaving}>
+                            <FormControl><SelectTrigger><SelectValue placeholder="Select an expense account" /></SelectTrigger></FormControl>
+                            <SelectContent>{expenseAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                    <FormMessage /></FormItem>
+                )}/>
+                <FormField control={editForm.control} name="description" render={({ field }) => (
+                    <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea {...field} disabled={isSaving} /></FormControl><FormMessage /></FormItem>
+                )}/>
+                <DialogFooter className="pt-4">
+                    <DialogClose asChild><Button type="button" variant="outline" disabled={isSaving}>Cancel</Button></DialogClose>
+                    <Button type="submit" disabled={isSaving}>
+                        {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save Changes
+                    </Button>
+                </DialogFooter>
+            </form>
+        </Form>
+    );
+};

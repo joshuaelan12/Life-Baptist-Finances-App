@@ -10,7 +10,7 @@ export const incomeSourceSchema = z.object({
   accountId: z.string().min(1, { message: "Account is required." }),
   description: z.string().optional(),
   // For non-Tithe items, this will be the budget. For Tithes, it's the actual amount.
-  amount: z.coerce.number().positive({ message: "Amount or Budget must be positive." }),
+  amount: z.coerce.number().min(0, { message: "Amount or Budget must be zero or more." }),
   memberName: z.string().optional(),
 }).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
   message: "Member name is required for tithes.",
@@ -26,7 +26,8 @@ export interface IncomeSourceFirestore {
   category: IncomeCategory;
   accountId?: string;
   description?: string;
-  budget?: number; // Annual budget for Offering, Donation, Other
+  budget?: number; // Legacy field for 2025 budget
+  budgets?: Record<string, number>; // New multi-year budget map
   recordedByUserId: string;
   createdAt: Timestamp;
 }
@@ -39,7 +40,8 @@ export interface IncomeSource {
   category: IncomeCategory;
   accountId?: string;
   description?: string;
-  budget?: number;
+  budget?: number; // Legacy field
+  budgets?: Record<string, number>; // New map
   createdAt?: Date;
   recordedByUserId?: string;
 }
@@ -145,7 +147,7 @@ export const expenseSourceSchema = z.object({
   expenseName: z.string().min(1, { message: "Expense name is required." }),
   category: z.enum(expenseCategories as [ExpenseCategory, ...ExpenseCategory[]], { required_error: "Category is required." }),
   accountId: z.string().min(1, { message: "Account is required." }),
-  budget: z.coerce.number().positive({ message: "Budget must be a positive number." }),
+  budget: z.coerce.number().min(0, { message: "Budget must be zero or more." }),
   description: z.string().optional(),
 });
 export type ExpenseSourceFormValues = z.infer<typeof expenseSourceSchema>;
@@ -159,7 +161,8 @@ export interface ExpenseSourceFirestore {
   category: ExpenseCategory;
   accountId?: string;
   description?: string;
-  budget?: number;
+  budget?: number; // Legacy field for 2025
+  budgets?: Record<string, number>; // New multi-year budget map
   recordedByUserId: string;
   createdAt: Timestamp;
 }
@@ -172,7 +175,8 @@ export interface ExpenseSource {
   category: ExpenseCategory;
   accountId?: string;
   description?: string;
-  budget?: number;
+  budget?: number; // Legacy field
+  budgets?: Record<string, number>; // New map
   createdAt?: Date;
   recordedByUserId?: string;
 }
