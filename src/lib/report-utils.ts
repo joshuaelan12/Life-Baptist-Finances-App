@@ -11,13 +11,109 @@ interface jsPDFWithAutoTable extends jsPDF {
   autoTable: (options: UserOptions) => jsPDF;
 }
 
-export const downloadCsv = (data: any[], reportTitle: string) => {
+const formatCurrency = (val: number | null | undefined) => {
+    if (typeof val !== 'number') return 'N/A';
+    return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+};
+
+const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
+    const csvData: any[] = [];
+    const headers = ['Type', 'Description', 'Budget', 'Realized', '% Realized', 'Date', 'Amount'];
+    csvData.push(headers);
+
+    const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
+    const accounts = data as Account[];
+    const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear, startDate, endDate } = options;
+
+    const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
+        if (!startDate || !endDate) return records;
+        return records.filter(r => r.date >= startDate && r.date <= endDate);
+    };
+
+    const filteredIncomeRecords = filterByDate(incomeRecords);
+    const filteredExpenseRecords = filterByDate(expenseRecords);
+
+    const grouped: Record<string, any[]> = {};
+    accounts.forEach(d => {
+        if (!grouped[d.type]) grouped[d.type] = [];
+        grouped[d.type].push(d);
+    });
+
+    typeOrder.forEach(type => {
+        if (grouped[type]) {
+            csvData.push([type.toUpperCase()]);
+            grouped[type].forEach((account: Account) => {
+                const accountBudget = account.budgets?.[budgetYear || ''] || 0;
+                const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
+                const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
+                const incomeFromDirectRecords = filteredIncomeRecords.filter(r => r.accountId === account.id && !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
+                const expenseFromDirectRecords = filteredExpenseRecords.filter(r => r.accountId === account.id && !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+                const realizedFromSources = (type === 'Income' ? relevantIncomeSources : relevantExpenseSources).reduce((sum, source) => {
+                    const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
+                    return sum + records.reduce((s, r) => s + r.amount, 0);
+                }, 0);
+                const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
+                const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
+                
+                csvData.push([
+                    'Account',
+                    `${account.code} - ${account.name}`,
+                    accountBudget,
+                    accountRealized,
+                    `${accountPercentage.toFixed(1)}%`
+                ]);
+
+                const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
+                sources.forEach(source => {
+                    const sourceBudget = source.budget || 0;
+                    const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
+                    const sourceRealized = records.reduce((sum, r) => sum + r.amount, 0);
+                    const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
+
+                    csvData.push([
+                        'Sub-Account',
+                        `  ${source.code} - ${'transactionName' in source ? source.transactionName : source.expenseName}`,
+                        sourceBudget,
+                        sourceRealized,
+                        `${sourcePercentage.toFixed(1)}%`
+                    ]);
+
+                    records.forEach(tx => {
+                         csvData.push([
+                            'Transaction',
+                            `    ${(tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName}`,
+                            '',
+                            '',
+                            '',
+                            format(tx.date, 'PP'),
+                            tx.amount,
+                        ]);
+                    });
+                });
+            });
+        }
+    });
+
+    return csvData;
+};
+
+
+export const downloadCsv = (data: any[], reportTitle: string, reportType: string, options: ReportOptions) => {
     if (data.length === 0) {
         alert("No data to download.");
         return;
     }
-
-    const ws = utils.json_to_sheet(data);
+    
+    let ws;
+    if (reportType === 'budget_vs_actuals' || reportType === 'balance_sheet') {
+        const hierarchicalData = generateHierarchicalDataForCsv(data, options);
+        ws = utils.aoa_to_sheet(hierarchicalData);
+    } else {
+        const { headers, body } = getHeadersAndRows(data, reportType, options);
+        const csvData = [headers[0]].concat(body);
+        ws = utils.aoa_to_sheet(csvData);
+    }
+    
     const wb = utils.book_new();
     utils.book_append_sheet(wb, ws, "Report");
     
@@ -36,10 +132,6 @@ interface ReportOptions {
     endDate?: Date;
 }
 
-const formatCurrency = (val: number | null | undefined) => {
-    if (typeof val !== 'number') return 'N/A';
-    return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-};
 
 const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptions): { headers: string[][], rows: any[][], total?: number, body: any[] } => {
     if (data.length === 0) return { headers: [], rows: [], body: [] };
@@ -174,7 +266,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                                  const subTableBody = records.map(tx => [
                                      format(tx.date, 'dd/MM/yy'),
                                      (tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName,
-                                     ('memberName' in tx) ? tx.memberName : ('payee' in tx) ? tx.payee : 'N/A',
+                                     ('memberName' in tx && tx.memberName) ? tx.memberName : ('payee' in tx && tx.payee) ? tx.payee : 'N/A',
                                      formatCurrency(tx.amount)
                                  ]);
                                  const subTable = {
@@ -239,6 +331,15 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
 
     if (isHierarchicalReport) {
         let finalY = 60;
+        doc.autoTable({
+            head: headers,
+            body: [], // Start with an empty body, we'll draw rows manually
+            startY: finalY,
+            theme: 'striped',
+            headStyles: { fillColor: [52, 111, 79], fontSize: 10 },
+        });
+        finalY = (doc as any).lastAutoTable.finalY;
+
         body.forEach((row, index) => {
              // Check if it's a sub-table placeholder
             if (row[0] && row[0]._subTable) {
@@ -263,20 +364,16 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
             }
             // Regular rows for the main table
             else {
-                const isMainAccount = row[0].content && row[0].styles?.fontStyle === 'bold';
                 doc.autoTable({
-                    head: index === 0 ? headers : [], // Show headers only once
                     body: [row],
                     startY: finalY,
-                    theme: isMainAccount ? 'striped' : 'grid',
-                    headStyles: { fillColor: [52, 111, 79], fontSize: 10 },
+                    theme: 'grid',
                     styles: { 
                         fontSize: 9, 
                         cellPadding: 3,
-                        lineWidth: isMainAccount ? {top: 0.5, right: 0.5, bottom: 0, left: 0.5} : 0.1,
-                        lineColor: isMainAccount ? '#333' : '#ccc'
+                        lineWidth: 0.1,
+                        lineColor: '#ccc'
                     },
-                    alternateRowStyles: { fillColor: [247, 242, 237] },
                 });
                 finalY = (doc as any).lastAutoTable.finalY;
             }
@@ -310,5 +407,3 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
 
     doc.save(fileName);
 };
-
-    

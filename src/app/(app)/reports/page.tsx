@@ -210,7 +210,7 @@ export default function ReportsPage() {
       }
 
       if (formatType === 'csv') {
-        downloadCsv(finalData, reportTitle);
+        downloadCsv(rawData, reportTitle, reportType, reportOptions);
       } else {
         downloadPdf(rawData, reportTitle, reportType, reportOptions);
       }
@@ -476,5 +476,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
-    
