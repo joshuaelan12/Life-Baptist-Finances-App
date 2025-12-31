@@ -37,10 +37,12 @@ export const addExpenseTransaction = async (
       createdAt: serverTimestamp(),
     });
 
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
     await logActivity(userId, userEmail, "CREATE_EXPENSE_TRANSACTION", {
       recordId: docRef.id,
       collectionName: EXPENSE_RECORDS_COLLECTION,
-      extraInfo: `Amount: ${recordData.amount} for source ${source.id}`
+      details: `Recorded expense of ${currencyFormatter.format(recordData.amount)} for "${recordData.expenseName}" under "${source.expenseName}".`
     });
 
     return docRef.id;
@@ -67,10 +69,12 @@ export const updateExpenseTransaction = async (
     }
     await updateDoc(recordRef, updatePayload as DocumentData);
 
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
     await logActivity(userId, userEmail, "UPDATE_EXPENSE_TRANSACTION", {
       recordId: recordId,
       collectionName: EXPENSE_RECORDS_COLLECTION,
-      extraInfo: `Updated fields for expense transaction.`
+      details: `Updated expense transaction: "${dataToUpdate.expenseName || recordId}". Amount: ${dataToUpdate.amount ? currencyFormatter.format(dataToUpdate.amount) : 'unchanged'}.`
     });
   } catch (error) {
     console.error('Error updating expense transaction: ', error);
@@ -87,10 +91,13 @@ export const deleteExpenseTransaction = async (
     throw new Error('User ID is required to delete an expense transaction.');
   }
   try {
+    // For a better log message, you could fetch the document first to get its details.
+    // For simplicity, we'll log with the ID.
     await deleteDoc(doc(db, EXPENSE_RECORDS_COLLECTION, recordId));
     await logActivity(userId, userEmail, "DELETE_EXPENSE_TRANSACTION", {
       recordId: recordId,
-      collectionName: EXPENSE_RECORDS_COLLECTION
+      collectionName: EXPENSE_RECORDS_COLLECTION,
+      details: `Deleted expense transaction with ID: ${recordId}.`
     });
   } catch (error) {
     console.error('Error deleting expense transaction: ', error);

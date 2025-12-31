@@ -36,7 +36,7 @@ export const addAccount = async (
     await logActivity(userId, userEmail, "CREATE_ACCOUNT", {
       recordId: docRef.id,
       collectionName: ACCOUNTS_COLLECTION,
-      extraInfo: `Code: ${accountData.code}, Name: ${accountData.name}`
+      details: `Created new account: "${accountData.name}" (Code: ${accountData.code})`
     });
     return docRef.id;
   } catch (error) {
@@ -61,7 +61,7 @@ export const updateAccount = async (
     await logActivity(userId, userEmail, "UPDATE_ACCOUNT", {
       recordId: accountId,
       collectionName: ACCOUNTS_COLLECTION,
-      extraInfo: `Updated account details for ${dataToUpdate.name}`
+      details: `Updated account "${dataToUpdate.name}" (Code: ${dataToUpdate.code})`
     });
   } catch (error) {
     console.error('Error updating account: ', error);
@@ -78,10 +78,13 @@ export const deleteAccount = async (
     throw new Error('User ID is required to delete an account.');
   }
   try {
+    // In a real-world scenario, you might want to fetch the account name before deleting.
+    // For this implementation, we will just log the ID.
     await deleteDoc(doc(db, ACCOUNTS_COLLECTION, accountId));
     await logActivity(userId, userEmail, "DELETE_ACCOUNT", {
       recordId: accountId,
-      collectionName: ACCOUNTS_COLLECTION
+      collectionName: ACCOUNTS_COLLECTION,
+      details: `Deleted account with ID: ${accountId}.`
     });
   } catch (error) {
     console.error('Error deleting account: ', error);
@@ -108,10 +111,12 @@ export const setBudgetForYear = async (
       [budgetField]: budget
     });
 
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
     await logActivity(userId, userEmail, "SET_BUDGET", {
         recordId: accountId,
         collectionName: ACCOUNTS_COLLECTION,
-        extraInfo: `Set budget for year ${year} to ${budget}`
+        details: `Set budget for year ${year} to ${currencyFormatter.format(budget)} on account ${accountId}`
     });
   } catch (error) {
     console.error(`Error setting budget for year ${year}: `, error);

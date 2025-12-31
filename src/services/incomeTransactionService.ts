@@ -35,10 +35,12 @@ export const addIncomeTransaction = async (
       createdAt: serverTimestamp(),
     });
 
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
     await logActivity(userId, userEmail, "CREATE_INCOME_TRANSACTION", {
       recordId: docRef.id,
       collectionName: INCOME_RECORDS_COLLECTION,
-      extraInfo: `Amount: ${recordData.amount} for source ${incomeSourceId}`
+      details: `Recorded income of ${currencyFormatter.format(recordData.amount)} for "${recordData.transactionName}" under source ${incomeSourceId}.`
     });
 
     return docRef.id;
@@ -64,11 +66,13 @@ export const updateIncomeTransaction = async (
       updatePayload.date = Timestamp.fromDate(dataToUpdate.date);
     }
     await updateDoc(recordRef, updatePayload as DocumentData);
+    
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "UPDATE_INCOME_TRANSACTION", {
       recordId: recordId,
       collectionName: INCOME_RECORDS_COLLECTION,
-      extraInfo: `Updated fields for income transaction.`
+      details: `Updated income transaction: "${dataToUpdate.transactionName || recordId}". Amount: ${dataToUpdate.amount ? currencyFormatter.format(dataToUpdate.amount) : 'unchanged'}.`
     });
   } catch (error) {
     console.error('Error updating income transaction: ', error);
@@ -88,7 +92,8 @@ export const deleteIncomeTransaction = async (
     await deleteDoc(doc(db, INCOME_RECORDS_COLLECTION, recordId));
     await logActivity(userId, userEmail, "DELETE_INCOME_TRANSACTION", {
       recordId: recordId,
-      collectionName: INCOME_RECORDS_COLLECTION
+      collectionName: INCOME_RECORDS_COLLECTION,
+      details: `Deleted income transaction with ID: ${recordId}.`
     });
   } catch (error) {
     console.error('Error deleting income transaction: ', error);

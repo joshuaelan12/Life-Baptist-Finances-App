@@ -41,7 +41,7 @@ export const addExpenseSource = async (
     await logActivity(userId, userEmail, "CREATE_EXPENSE_SOURCE", {
       recordId: docRef.id,
       collectionName: EXPENSES_SOURCES_COLLECTION,
-      extraInfo: `Name: ${sourceData.expenseName}, Initial Budget: ${JSON.stringify(budgets)}`
+      details: `Created expense source: "${sourceData.expenseName}"`
     });
     return docRef.id;
   } catch (error) {
@@ -62,17 +62,23 @@ export const updateExpenseSource = async (
   try {
     const recordRef = doc(db, EXPENSES_SOURCES_COLLECTION, sourceId);
     
-    // The `budget` field from the form is for validation and initial creation only.
-    // We remove it here to avoid saving it to Firestore during updates.
-    // The actual budget values are in the `budgets` map.
     const { budget, ...updatePayload } = dataToUpdate;
 
     await updateDoc(recordRef, updatePayload as DocumentData);
 
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
+    let details = `Updated expense source: "${dataToUpdate.expenseName || sourceId}".`;
+    if (dataToUpdate.budgets) {
+        const year = Object.keys(dataToUpdate.budgets)[0];
+        const newBudget = dataToUpdate.budgets[year];
+        details = `Set budget for ${year} to ${currencyFormatter.format(newBudget)} for expense source "${dataToUpdate.expenseName || sourceId}".`;
+    }
+
     await logActivity(userId, userEmail, "UPDATE_EXPENSE_SOURCE", {
       recordId: sourceId,
       collectionName: EXPENSES_SOURCES_COLLECTION,
-      extraInfo: `Updated fields for expense source.`
+      details: details
     });
   } catch (error) {
     console.error('Error updating expense source: ', error);
@@ -91,29 +97,26 @@ export const deleteExpenseSource = async (
   const batch = writeBatch(db);
   
   try {
-    // 1. Find all transactions related to this source
     const transactionsQuery = query(collection(db, EXPENSE_RECORDS_COLLECTION), where('expenseSourceId', '==', sourceId));
     const transactionsSnapshot = await getDocs(transactionsQuery);
     
-    // 2. Add delete operations for each transaction to the batch
     transactionsSnapshot.forEach(transactionDoc => {
         batch.delete(transactionDoc.ref);
     });
 
-    // 3. Add the delete operation for the source itself to the batch
     const sourceRef = doc(db, EXPENSES_SOURCES_COLLECTION, sourceId);
     batch.delete(sourceRef);
 
-    // 4. Commit the batch
     await batch.commit();
 
     await logActivity(userId, userEmail, "DELETE_EXPENSE_SOURCE", {
       recordId: sourceId,
       collectionName: EXPENSES_SOURCES_COLLECTION,
-      extraInfo: `Deleted source and ${transactionsSnapshot.size} associated transactions.`
+      details: `Deleted expense source (ID: ${sourceId}) and ${transactionsSnapshot.size} associated transactions.`
     });
   } catch (error) {
     console.error('Error deleting expense source and its transactions: ', error);
     throw new Error("Failed to delete expense source. It may be in use in other records.");
   }
 };
+

@@ -44,7 +44,7 @@ export const addIncomeSource = async (
     await logActivity(userId, userEmail, "CREATE_INCOME_SOURCE", {
       recordId: docRef.id,
       collectionName: INCOME_SOURCES_COLLECTION,
-      extraInfo: `Name: ${sourceData.transactionName}, Initial Budgets: ${JSON.stringify(budgets)}`
+      details: `Created income source: "${sourceData.transactionName}"`
     });
 
     return docRef.id;
@@ -70,11 +70,13 @@ export const addTitheTransaction = async (
       recordedByUserId: userId,
       createdAt: serverTimestamp(),
     });
+    
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "CREATE_INCOME_RECORD", {
       recordId: docRef.id,
       collectionName: INCOME_RECORDS_COLLECTION,
-      extraInfo: `Tithe from ${recordData.memberName}, Amount: ${recordData.amount}`
+      details: `Recorded Tithe of ${currencyFormatter.format(recordData.amount)} from member "${recordData.memberName}".`
     });
 
     return docRef.id;
@@ -97,16 +99,23 @@ export const updateIncomeSource = async (
   try {
     const recordRef = doc(db, INCOME_SOURCES_COLLECTION, sourceId);
     
-    // The `amount` field from the form is for validation and initial creation.
-    // We remove it here to avoid overwriting the `budgets` map.
     const { amount, ...updatePayload } = dataToUpdate;
 
     await updateDoc(recordRef, updatePayload as DocumentData);
+    
+    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+
+    let details = `Updated income source: "${dataToUpdate.transactionName || sourceId}".`;
+    if (dataToUpdate.budgets) {
+        const year = Object.keys(dataToUpdate.budgets)[0];
+        const newBudget = dataToUpdate.budgets[year];
+        details = `Set budget for ${year} to ${currencyFormatter.format(newBudget)} for income source "${dataToUpdate.transactionName || sourceId}".`;
+    }
 
     await logActivity(userId, userEmail, "UPDATE_INCOME_SOURCE", {
       recordId: sourceId,
       collectionName: INCOME_SOURCES_COLLECTION,
-      extraInfo: `Updated fields for income source.`
+      details: details,
     });
   } catch (error) {
     console.error('Error updating income source: ', error);
@@ -125,26 +134,22 @@ export const deleteIncomeSource = async (
   const batch = writeBatch(db);
 
   try {
-    // 1. Find all transactions associated with this income source
     const transactionsQuery = query(collection(db, INCOME_RECORDS_COLLECTION), where('incomeSourceId', '==', sourceId));
     const transactionSnapshot = await getDocs(transactionsQuery);
 
-    // 2. Add delete operations for each transaction to the batch
     transactionSnapshot.forEach(transactionDoc => {
       batch.delete(transactionDoc.ref);
     });
 
-    // 3. Add the delete operation for the income source itself
     const sourceRef = doc(db, INCOME_SOURCES_COLLECTION, sourceId);
     batch.delete(sourceRef);
 
-    // 4. Commit the batch
     await batch.commit();
 
     await logActivity(userId, userEmail, "DELETE_INCOME_SOURCE", {
       recordId: sourceId,
       collectionName: INCOME_SOURCES_COLLECTION,
-      extraInfo: `Deleted source and ${transactionSnapshot.size} associated transactions.`
+      details: `Deleted income source (ID: ${sourceId}) and ${transactionSnapshot.size} associated transactions.`
     });
   } catch (error) {
     console.error('Error deleting income source and transactions: ', error);

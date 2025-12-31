@@ -34,7 +34,7 @@ export const addMember = async (
     await logActivity(userId, userEmail, "CREATE_MEMBER", {
       recordId: docRef.id,
       collectionName: MEMBERS_COLLECTION,
-      extraInfo: `Added member: ${memberData.fullName}`
+      details: `Added new member: "${memberData.fullName}"`
     });
     return docRef.id;
   } catch (error) {
@@ -59,7 +59,7 @@ export const updateMember = async (
     await logActivity(userId, userEmail, "UPDATE_MEMBER", {
       recordId: memberId,
       collectionName: MEMBERS_COLLECTION,
-      extraInfo: `Updated member name to ${dataToUpdate.fullName}`
+      details: `Updated member name to "${dataToUpdate.fullName}"`
     });
   } catch (error) {
     console.error('Error updating member: ', error);
@@ -79,7 +79,8 @@ export const deleteMember = async (
     await deleteDoc(doc(db, MEMBERS_COLLECTION, memberId));
     await logActivity(userId, userEmail, "DELETE_MEMBER", {
       recordId: memberId,
-      collectionName: MEMBERS_COLLECTION
+      collectionName: MEMBERS_COLLECTION,
+      details: `Deleted member with ID: ${memberId}.`
     });
   } catch (error) {
     console.error('Error deleting member: ', error);

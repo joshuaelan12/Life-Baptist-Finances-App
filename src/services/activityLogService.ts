@@ -10,40 +10,33 @@ const ACTIVITY_LOGS_COLLECTION = 'activity_logs';
 interface LogActivityDetails {
   recordId?: string;
   collectionName?: string;
-  extraInfo?: string; // For any other string details
+  details?: string; // For descriptive plain-English text
 }
 
 export const logActivity = async (
   userId: string,
   userEmail: string,
   action: ActivityLogAction,
-  details?: LogActivityDetails
+  logDetails?: LogActivityDetails
 ): Promise<void> => {
   if (!userId || !userEmail) {
     console.warn('User ID or Email missing, skipping activity log for action:', action);
-    // Optionally throw an error or handle as per app's requirements
     // For now, we'll just log a warning and not save the log.
     return;
   }
 
   try {
-    let detailString = "";
-    if (details?.recordId) detailString += `Record ID: ${details.recordId}. `;
-    if (details?.collectionName) detailString += `Collection: ${details.collectionName}. `;
-    if (details?.extraInfo) detailString += details.extraInfo;
-
-
     await addDoc(collection(db, ACTIVITY_LOGS_COLLECTION), {
       userId,
       userEmail,
       action,
       timestamp: serverTimestamp(),
-      details: detailString.trim() || undefined, // Store undefined if empty
-      recordId: details?.recordId || undefined,
-      collectionName: details?.collectionName || undefined,
+      details: logDetails?.details || undefined,
+      recordId: logDetails?.recordId || undefined,
+      collectionName: logDetails?.collectionName || undefined,
     });
   } catch (error) {
-    console.error('Error logging activity: ', error, { userId, userEmail, action, details });
+    console.error('Error logging activity: ', error, { userId, userEmail, action, logDetails });
     // Decide if this error should be re-thrown or handled silently
   }
 };
