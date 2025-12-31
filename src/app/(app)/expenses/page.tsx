@@ -66,7 +66,7 @@ const accountConverter = {
 
 export default function ExpensesPage() {
   const { toast } = useToast();
-  const [authUser, authLoading] = useAuthState(auth);
+  const [authUser, authLoading, authError] = useAuthState(auth);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
