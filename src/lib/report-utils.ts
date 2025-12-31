@@ -13,7 +13,8 @@ interface jsPDFWithAutoTable extends jsPDF {
 
 const formatCurrency = (val: number | null | undefined) => {
     if (typeof val !== 'number') return 'N/A';
-    return val.toLocaleString('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    // Use en-US locale to get comma separators, but keep XAF currency
+    return val.toLocaleString('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace('XAF', '') + ' XAF';
 };
 
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
@@ -65,7 +66,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
                 const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
-                    const sourceBudget = source.budget || 0;
+                    const sourceBudget = source.budgets?.[budgetYear || ''] || 0;
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
                     const sourceRealized = records.reduce((sum, r) => sum + r.amount, 0);
                     const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
@@ -215,7 +216,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
 
              typeOrder.forEach(type => {
                  if (grouped[type]) {
-                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#e2e8f0', textColor: '#1e293b' } }]);
+                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#F2EAE2', textColor: '#2A4035' } }]);
                      
                      grouped[type].forEach((account: Account) => {
                          const accountBudget = account.budgets?.[options.budgetYear || ''] || 0;
@@ -236,17 +237,17 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                          
                          body.push([
-                             { content: `${account.code} - ${account.name}`, styles: { fontStyle: 'bold' } },
-                             account.type,
-                             { content: formatCurrency(accountBudget), styles: { halign: 'right' } },
-                             { content: formatCurrency(accountRealized), styles: { halign: 'right' } },
-                             { content: `${accountPercentage.toFixed(1)}%`, styles: { halign: 'right' } }
+                             { content: `${account.code} - ${account.name}`, styles: { fontStyle: 'bold', fillColor: '#FAF5F0' } },
+                             { content: account.type, styles: { fillColor: '#FAF5F0' } },
+                             { content: formatCurrency(accountBudget), styles: { halign: 'right', fillColor: '#FAF5F0' } },
+                             { content: formatCurrency(accountRealized), styles: { halign: 'right', fillColor: '#FAF5F0' } },
+                             { content: `${accountPercentage.toFixed(1)}%`, styles: { halign: 'right', fillColor: '#FAF5F0' } }
                          ]);
 
                          const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
 
                          sources.forEach(source => {
-                             const sourceBudget = source.budget || 0;
+                             const sourceBudget = source.budgets?.[options.budgetYear || ''] || 0;
                              const records = type === 'Income' 
                                  ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) 
                                  : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
@@ -266,15 +267,15 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                                  const subTableBody = records.map(tx => [
                                      format(tx.date, 'dd/MM/yy'),
                                      (tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName,
-                                     ('memberName' in tx && tx.memberName) ? tx.memberName : ('payee' in tx && tx.payee) ? tx.payee : 'N/A',
+                                     ('memberName' in tx && tx.memberName) ? tx.memberName : ('payee' in tx && tx.payee) ? tx.payee : '',
                                      formatCurrency(tx.amount)
                                  ]);
                                  const subTable = {
                                      head: [['Date', 'Description', 'Member/Payee', 'Amount']],
                                      body: subTableBody,
                                      theme: 'grid' as const,
-                                     styles: { fontSize: 8, cellPadding: 1.5 },
-                                     headStyles: { fillColor: '#f8fafc', textColor: '#475569', fontStyle: 'bold' as const, lineWidth: 0.1 },
+                                     styles: { fontSize: 8, cellPadding: 2, lineWidth: 0.1 },
+                                     headStyles: { fillColor: '#F7F2ED', textColor: '#2A4035', fontStyle: 'bold' as const, lineWidth: 0.1 },
                                      columnStyles: { 3: { halign: 'right' as const } }
                                  };
                                  body.push([{
@@ -314,96 +315,136 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     const doc = new jsPDF('p', 'pt', 'a4') as jsPDFWithAutoTable;
     const { headers, body, total } = getHeadersAndRows(data, reportType, options);
     const fileName = `${reportTitle.replace(/[\s/]/g, '_')}.pdf`;
+    const pageWidth = doc.internal.pageSize.getWidth();
 
-    // Set title
-    doc.setFontSize(18);
-    doc.text("Life Baptist Church Mutengene", doc.internal.pageSize.getWidth() / 2, 30, { align: 'center' });
-    doc.setFontSize(12);
-    doc.setTextColor(100);
+    // Add Header
+    const addHeader = () => {
+        doc.setFontSize(20);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor('#2A4035'); // --foreground color
+        doc.text("Life Baptist Church Mutengene", pageWidth / 2, 40, { align: 'center' });
+        
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor('#857B70'); // --muted-foreground
+        const subTitle = reportType === 'budget_vs_actuals'
+            ? `Budget vs. Actuals Report ${options.periodString || ''}`
+            : reportTitle;
+        doc.text(subTitle, pageWidth / 2, 60, { align: 'center' });
+    };
 
-    const subTitle = reportType === 'budget_vs_actuals'
-        ? `Budget vs. Actuals Report ${options.periodString || ''}`
-        : reportTitle;
-    doc.text(subTitle, doc.internal.pageSize.getWidth() / 2, 45, { align: 'center' });
+    // Add Footer
+    const addFooter = () => {
+        const pageCount = (doc.internal as any).getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor('#857B70');
+            const footerText = `Page ${i} of ${pageCount} | Generated on: ${format(new Date(), 'PPpp')}`;
+            doc.text(footerText, pageWidth / 2, doc.internal.pageSize.getHeight() - 20, { align: 'center' });
+        }
+    };
 
-    
     const isHierarchicalReport = reportType === 'budget_vs_actuals' || reportType === 'balance_sheet';
 
     if (isHierarchicalReport) {
-        let finalY = 60;
+        addHeader();
+        let startY = 80;
+        
         doc.autoTable({
             head: headers,
-            body: [], // Start with an empty body, we'll draw rows manually
-            startY: finalY,
+            body: [], // Empty body, we render manually
+            startY: startY,
             theme: 'striped',
-            headStyles: { fillColor: [52, 111, 79], fontSize: 10 },
+            headStyles: { 
+                fillColor: '#346F4F', // --primary
+                textColor: '#F7F2ED', // --primary-foreground
+                fontSize: 10,
+                fontStyle: 'bold',
+            },
+            // This is just to draw the header
+            didDrawPage: (data) => {
+                if (data.pageNumber === 1) addHeader();
+            }
         });
-        finalY = (doc as any).lastAutoTable.finalY;
 
-        body.forEach((row, index) => {
-             // Check if it's a sub-table placeholder
-            if (row[0] && row[0]._subTable) {
+        let finalY = (doc as any).lastAutoTable.finalY;
+
+        body.forEach(row => {
+            if (finalY > doc.internal.pageSize.getHeight() - 100) {
+                doc.addPage();
+                finalY = 40;
+                addHeader();
+            }
+
+            if (row[0]?._subTable) {
                 const subTableData = row[0]._subTable;
                 doc.autoTable({
                     ...subTableData,
-                    startY: finalY,
-                    margin: { left: 45 }, // Indent sub-table
-                    tableWidth: doc.internal.pageSize.getWidth() - 80,
+                    startY: finalY + 2,
+                    margin: { left: 45 },
+                    tableWidth: pageWidth - 80,
+                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
                 });
-                finalY = (doc as any).lastAutoTable.finalY + 5;
-            } 
-            // Check if it's a section header
-            else if (row[0] && row[0].colSpan === 5) {
-                 doc.autoTable({
+                finalY = (doc as any).lastAutoTable.finalY;
+            } else if (row[0]?.colSpan === 5) { // Section header
+                doc.autoTable({
                     body: [row],
-                    startY: finalY,
+                    startY: finalY + 5,
                     theme: 'plain',
-                    styles: { fontSize: 11, fontStyle: 'bold' }
-                 });
-                 finalY = (doc as any).lastAutoTable.finalY;
-            }
-            // Regular rows for the main table
-            else {
+                    styles: { fontSize: 11, fontStyle: 'bold' },
+                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
+                });
+                finalY = (doc as any).lastAutoTable.finalY;
+            } else { // Regular main table row
                 doc.autoTable({
                     body: [row],
                     startY: finalY,
                     theme: 'grid',
                     styles: { 
                         fontSize: 9, 
-                        cellPadding: 3,
-                        lineWidth: 0.1,
-                        lineColor: '#ccc'
+                        cellPadding: 4,
+                        lineWidth: 0.2,
+                        lineColor: '#DCD0C3' // --border
                     },
+                    didDrawPage: (data) => { if(data.pageNumber > 1) addHeader(); }
                 });
                 finalY = (doc as any).lastAutoTable.finalY;
             }
         });
 
-    } else {
+    } else { // Standard reports
+        addHeader();
         doc.autoTable({
             head: headers,
             body: body.filter(row => !row[0]?._subTable),
-            startY: 55,
-            headStyles: { fillColor: [52, 111, 79], fontSize: 10 },
-            styles: { fontSize: 9, cellPadding: 2.5 },
-            alternateRowStyles: { fillColor: [247, 242, 237] },
+            startY: 80,
+            headStyles: { 
+                fillColor: '#346F4F', // --primary
+                textColor: '#F7F2ED', // --primary-foreground
+                fontSize: 10,
+                fontStyle: 'bold'
+            },
+            styles: { fontSize: 9, cellPadding: 4 },
+            alternateRowStyles: { fillColor: '#FAF5F0' }, // --popover
+            didDrawPage: (data) => {
+                if (data.pageNumber === 1) addHeader();
+            }
         });
+        
+        if (total !== undefined) {
+            let finalYpos = (doc as any).lastAutoTable.finalY || 80;
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'bold');
+            doc.text(
+                `Total: ${formatCurrency(total)}`,
+                pageWidth - 40,
+                finalYpos + 25,
+                { align: 'right' }
+            );
+        }
     }
 
-
-    let finalYpos = (doc as any).lastAutoTable.finalY || 55;
-
-    if (total !== undefined) {
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.text(
-            `Total: ${formatCurrency(total)}`,
-            doc.internal.pageSize.getWidth() - 20,
-            finalYpos + 20,
-            { align: 'right' }
-        );
-    }
-
-
+    addFooter();
     doc.save(fileName);
 };
