@@ -198,7 +198,7 @@ export default function AccountsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + i);
+    const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
     const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
 
 
@@ -257,9 +257,8 @@ export default function AccountsPage() {
 
             <Card className="shadow-lg">
                 <CardHeader>
-                    <CardTitle>Manage Accounts</CardTitle>
                     <div className="flex justify-between items-center">
-                        <CardDescription>View, edit, and manage budgets for existing accounts.</CardDescription>
+                        <CardTitle>Manage Accounts</CardTitle>
                         <div className="flex items-center gap-2">
                              <Label htmlFor="year-select">Year:</Label>
                              <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
@@ -272,6 +271,7 @@ export default function AccountsPage() {
                              </Select>
                         </div>
                     </div>
+                     <CardDescription>View, edit, and manage budgets for existing accounts.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {errorAccounts && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{errorAccounts.message}</AlertDescription></Alert>}
@@ -390,9 +390,3 @@ export default function AccountsPage() {
         </div>
     );
 }
-
-    
-
-    
-
-    

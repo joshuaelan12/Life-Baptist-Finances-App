@@ -225,7 +225,7 @@ export default function IncomePage() {
 
   const isLoading = authLoading || loadingSources || loadingAccounts || loadingMembers || loadingRecords;
   const dataError = errorSources || errorAccounts || errorMembers || errorRecords;
-  const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
+  const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
 
   return (
@@ -331,7 +331,7 @@ export default function IncomePage() {
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        {pastYearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}
+                        {yearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}
                     </SelectContent>
                  </Select>
             </div>

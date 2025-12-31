@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PlusCircle, Trash2, Loader2, AlertTriangle, ReceiptText, Edit, Coins } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from 'zod';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -202,6 +203,7 @@ export default function ExpensesPage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
   };
 
+  const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
   const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
   
   const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords;
@@ -306,7 +308,7 @@ export default function ExpensesPage() {
                 <Label htmlFor="year-select">Year:</Label>
                 <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
                     <SelectTrigger className="w-[120px]" id="year-select"><SelectValue /></SelectTrigger>
-                    <SelectContent>{pastYearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent>
+                    <SelectContent>{yearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent>
                 </Select>
             </div>
           </div>

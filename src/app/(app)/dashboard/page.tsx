@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { DollarSign, Users, HandCoins, Landmark, LineChart, TrendingUp, TrendingDown, Loader2, AlertTriangle, ReceiptText, Scale } from 'lucide-react';
@@ -13,8 +13,10 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore } from '@/types';
-import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns';
+import { format, subMonths, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Firestore Converters
 const incomeConverter = {
@@ -63,12 +65,9 @@ const expenseConverter = {
 };
 
 
-// Mock data for parts not yet connected to real-time Firestore data
-const MOCK_PREVIOUS_PERIOD_TOTAL_INCOME = 2000000; // XAF
-
-
 export default function DashboardPage() {
   const [authUser, authLoading, authError] = useAuthState(auth);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const incomeCollectionRef = authUser ? collection(db, 'income_records') : null;
   const incomeQuery = incomeCollectionRef 
@@ -84,40 +83,53 @@ export default function DashboardPage() {
 
 
   const financialSummary = useMemo(() => {
+    const yearStart = startOfYear(new Date(selectedYear, 0, 1));
+    const yearEnd = endOfYear(new Date(selectedYear, 0, 1));
+    const prevYearStart = startOfYear(subMonths(yearStart, 12));
+    const prevYearEnd = endOfYear(subMonths(yearStart, 12));
+
     let totalOfferings = 0;
     let otherIncome = 0;
     let totalTithes = 0;
-    
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    let prevYearTotalIncome = 0;
+
     incomeRecords?.forEach(record => {
-      if (record.category === "Offering") {
-        totalOfferings += record.amount;
-      } else if (record.category === "Tithe") {
-        totalTithes += record.amount;
-      } else if (record.category === "Donation" || record.category === "Other") {
-        otherIncome += record.amount;
+      if (record.date >= yearStart && record.date <= yearEnd) {
+        if (record.category === "Offering") totalOfferings += record.amount;
+        else if (record.category === "Tithe") totalTithes += record.amount;
+        else if (record.category === "Donation" || record.category === "Other") otherIncome += record.amount;
+      }
+      if (record.date >= prevYearStart && record.date <= prevYearEnd) {
+        prevYearTotalIncome += record.amount;
       }
     });
 
-    const totalIncome = totalOfferings + totalTithes + otherIncome;
-    const totalExpenses = expenseRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
+    totalIncome = totalOfferings + totalTithes + otherIncome;
+
+    expenseRecords?.forEach(record => {
+       if (record.date >= yearStart && record.date <= yearEnd) {
+        totalExpenses += record.amount;
+      }
+    });
+    
     const netBalance = totalIncome - totalExpenses;
 
+    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome };
+  }, [incomeRecords, expenseRecords, selectedYear]);
 
-    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance };
-  }, [incomeRecords, expenseRecords]);
-
-  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance } = financialSummary;
+  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome } = financialSummary;
   
-  const incomeChangePercentage = totalIncome && MOCK_PREVIOUS_PERIOD_TOTAL_INCOME
-    ? ((totalIncome - MOCK_PREVIOUS_PERIOD_TOTAL_INCOME) / MOCK_PREVIOUS_PERIOD_TOTAL_INCOME) * 100
-    : 0;
+  const incomeChangePercentage = totalIncome && prevYearTotalIncome
+    ? ((totalIncome - prevYearTotalIncome) / prevYearTotalIncome) * 100
+    : totalIncome > 0 ? Infinity : 0; // Show Infinity if there was no income last year but there is this year.
 
   const monthlyChartData = useMemo(() => {
-    const dataForLast6Months: { month: string; income: number; expenses: number }[] = [];
-    const today = new Date();
-
-    for (let i = 5; i >= 0; i--) {
-      const targetMonthDate = subMonths(today, i);
+    const dataForYear: { month: string; income: number; expenses: number }[] = [];
+    
+    for (let i = 0; i < 12; i++) {
+      const targetMonthDate = new Date(selectedYear, i, 1);
       const monthName = format(targetMonthDate, "MMM");
       const monthStart = startOfMonth(targetMonthDate);
       const monthEnd = endOfMonth(targetMonthDate);
@@ -136,14 +148,14 @@ export default function DashboardPage() {
         }
       });
 
-      dataForLast6Months.push({
+      dataForYear.push({
         month: monthName,
         income: monthlyIncomeTotal,
         expenses: monthlyExpensesTotal,
       });
     }
-    return dataForLast6Months;
-  }, [incomeRecords, expenseRecords]);
+    return dataForYear;
+  }, [incomeRecords, expenseRecords, selectedYear]);
   
   const incomeBreakdownData = useMemo(() => [
     { name: 'Offerings', value: totalOfferings, fill: "hsl(var(--chart-1))" },
@@ -163,6 +175,9 @@ export default function DashboardPage() {
   const formatCurrencyWithDecimals = (value: number) => {
      return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
   };
+
+  const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
+
 
   if (authLoading) {
     return (
@@ -217,6 +232,13 @@ export default function DashboardPage() {
     <div className="space-y-6 md:space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <div className="flex items-center gap-2">
+            <Label htmlFor="year-select">Year:</Label>
+            <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
+                <SelectTrigger className="w-[120px]" id="year-select"><SelectValue /></SelectTrigger>
+                <SelectContent>{pastYearOptions.map(year => <SelectItem key={year} value={String(year)}>{year}</SelectItem>)}</SelectContent>
+            </Select>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -226,8 +248,10 @@ export default function DashboardPage() {
           icon={LineChart}
           description={
             <span className={`flex items-center ${incomeChangePercentage >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-              {incomeChangePercentage >= 0 ? <TrendingUp className="h-4 w-4 mr-1" /> : <TrendingDown className="h-4 w-4 mr-1" />}
-              {incomeChangePercentage.toLocaleString('fr-CM', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% from last period (mock)
+              {isFinite(incomeChangePercentage) && (incomeChangePercentage >= 0 ? <TrendingUp className="h-4 w-4 mr-1" /> : <TrendingDown className="h-4 w-4 mr-1" />)}
+              {isFinite(incomeChangePercentage) 
+                ? `${incomeChangePercentage.toLocaleString('fr-CM', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% from last year`
+                : (totalIncome > 0 ? "Up from 0 last year" : "No change")}
             </span>
           }
           iconClassName={incomeChangePercentage >= 0 ? 'text-emerald-500' : 'text-red-500'}
@@ -236,7 +260,7 @@ export default function DashboardPage() {
           title="Total Expenses"
           value={formatCurrency(totalExpenses)}
           icon={ReceiptText}
-          description="All recorded expenses"
+          description={`All recorded expenses for ${selectedYear}`}
         />
         <StatCard
           title="Net Balance"
@@ -249,27 +273,27 @@ export default function DashboardPage() {
           title="Total Offerings"
           value={formatCurrency(totalOfferings)}
           icon={HandCoins}
-          description="All offerings received"
+          description={`Offerings received in ${selectedYear}`}
         />
         <StatCard
           title="Total Tithes"
           value={formatCurrency(totalTithes)}
           icon={Users}
-          description="Tithes from members"
+          description={`Tithes from members in ${selectedYear}`}
         />
         <StatCard
           title="Other Income"
           value={formatCurrency(otherIncome)}
           icon={Landmark}
-          description="Donations, events, etc."
+          description={`Donations, events, etc. in ${selectedYear}`}
         />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Income vs Expenses Overview</CardTitle>
-            <CardDescription>Monthly income and expenses (real-time) for the last 6 months.</CardDescription>
+            <CardTitle>Income vs Expenses ({selectedYear})</CardTitle>
+            <CardDescription>Monthly breakdown for the selected year.</CardDescription>
           </CardHeader>
           <CardContent className="h-[350px] p-2">
             <ChartContainer config={incomeChartConfig} className="w-full h-full">
@@ -277,15 +301,12 @@ export default function DashboardPage() {
                 <BarChart data={monthlyChartData} margin={{ top: 20, right: 0, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k XAF`} tickLine={false} axisLine={false} tickMargin={8} width={80} />
+                  <YAxis tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} tickLine={false} axisLine={false} tickMargin={8} width={80} />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="dot" formatter={(value, name, props) => {
-                     const formattedValue = (props.payload?.name === 'Income' || props.payload?.name === 'Expenses') 
-                                          ? formatCurrency(Number(value))
-                                          : `${Number(value).toLocaleString('fr-CM')} XAF`; 
                      return (
                         <div className="flex flex-col">
                           <span className="text-muted-foreground">{props.payload?.month}</span>
-                          <span className="font-semibold">{`${name}: ${formattedValue}`}</span>
+                          <span className="font-semibold">{`${name}: ${formatCurrency(Number(value))}`}</span>
                         </div>
                      );
                   }} />} />
@@ -300,15 +321,15 @@ export default function DashboardPage() {
 
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Income Breakdown</CardTitle>
-            <CardDescription>Distribution of real-time income sources.</CardDescription>
+            <CardTitle>Income Breakdown ({selectedYear})</CardTitle>
+            <CardDescription>Distribution of income sources for the selected year.</CardDescription>
           </CardHeader>
           <CardContent className="h-[350px] p-2">
              <ChartContainer config={{}} className="w-full h-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={incomeBreakdownData} layout="vertical" margin={{ top: 20, right: 50, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k XAF`} />
+                  <XAxis type="number" tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} />
                   <YAxis dataKey="name" type="category" width={80} tickLine={false} axisLine={false} />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(value, name) => {
                      return (
@@ -331,15 +352,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-      <Alert variant="default" className="bg-muted/50">
-        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-        <AlertTitle className="text-muted-foreground">Note</AlertTitle>
-        <AlertDescription className="text-muted-foreground">
-          The "percentage from last period" for total income is currently using mock values. Historical comparison will be implemented in a future update.
-        </AlertDescription>
-      </Alert>
     </div>
   );
 }
-
-    
