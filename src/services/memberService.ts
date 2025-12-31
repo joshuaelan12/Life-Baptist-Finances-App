@@ -53,7 +53,7 @@ export const updateMember = async (
     throw new Error('User ID is required to update a member.');
   }
   try {
-    const memberRef = doc(db, MEMBERS_COLlection, memberId);
+    const memberRef = doc(db, MEMBERS_COLLECTION, memberId);
     await updateDoc(memberRef, dataToUpdate as DocumentData);
 
     await logActivity(userId, userEmail, "UPDATE_MEMBER", {
@@ -86,3 +86,5 @@ export const deleteMember = async (
     throw new Error("Failed to delete the member.");
   }
 };
+
+    

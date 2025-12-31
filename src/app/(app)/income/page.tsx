@@ -15,6 +15,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import type { IncomeSource, IncomeSourceFormValues, IncomeCategory, IncomeSourceFirestore, Account, AccountFirestore, Member, MemberFirestore, IncomeRecord } from '@/types';
 import { incomeSourceSchema } from '@/types';
 import { addIncomeSource, deleteIncomeSource, updateIncomeSource, addTitheTransaction } from '@/services/incomeService';
@@ -243,13 +244,13 @@ export default function IncomePage() {
     }
   };
 
-  const handleDeleteRecord = async (source: IncomeSource) => {
+  const handleDeleteRecord = async (sourceId: string) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete." });
       return;
     }
     try {
-      await deleteIncomeSource(source.id, authUser.uid, authUser.email);
+      await deleteIncomeSource(sourceId, authUser.uid, authUser.email);
       toast({ title: "Deleted", description: `Income source deleted successfully.` });
     } catch (err) {
       console.error(err);
@@ -408,9 +409,21 @@ export default function IncomePage() {
                                 <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit income source">
                                     <Edit className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete income source">
-                                    <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button variant="ghost" size="icon" aria-label="Delete income source"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                            <AlertDialogDescription>This action will permanently delete the income source "{source.transactionName}". This cannot be undone.</AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction onClick={() => handleDeleteRecord(source.id)}>Delete</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
                               </TableCell>
                           </TableRow>
                       );

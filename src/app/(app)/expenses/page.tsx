@@ -14,6 +14,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import type { ExpenseSource, ExpenseSourceFormValues, ExpenseCategory, ExpenseSourceFirestore, Account, AccountFirestore } from '@/types';
 import { expenseSourceSchema, expenseCategories } from '@/types';
 import { addExpenseSource, updateExpenseSource, deleteExpenseSource } from '@/services/expenseService';
@@ -217,13 +218,13 @@ export default function ExpensesPage() {
     }
   };
   
-  const handleDeleteRecord = async (source: ExpenseSource) => {
+  const handleDeleteRecord = async (sourceId: string) => {
     if (!authUser?.uid || !authUser.email) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in to delete." });
       return;
     }
     try {
-      await deleteExpenseSource(source.id, authUser.uid, authUser.email);
+      await deleteExpenseSource(sourceId, authUser.uid, authUser.email);
       toast({ title: "Deleted", description: `Expense source deleted successfully.` });
     } catch (err) {
       console.error(err);
@@ -431,9 +432,21 @@ export default function ExpensesPage() {
                             <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Edit expense source">
                                 <Edit className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRecord(source)} disabled={!authUser || form.formState.isSubmitting} aria-label="Delete expense source">
-                                <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="ghost" size="icon" aria-label="Delete expense source"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                        <AlertDialogDescription>This action will permanently delete the expense source "{source.expenseName}". This cannot be undone.</AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteRecord(source.id)}>Delete</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
                           </TableCell>
                         </TableRow>
                       );

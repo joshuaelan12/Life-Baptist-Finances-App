@@ -7,7 +7,7 @@ import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firesto
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
-import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle } from 'lucide-react';
+import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { useForm } from "react-hook-form";
@@ -25,7 +27,7 @@ import { z } from 'zod';
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '@/lib/firebase';
-import { addIncomeTransaction } from '@/services/incomeTransactionService';
+import { addIncomeTransaction, updateIncomeTransaction, deleteIncomeTransaction } from '@/services/incomeTransactionService';
 
 const incomeSourceConverter = {
     fromFirestore: (snapshot: any): IncomeSource => {
@@ -66,6 +68,8 @@ export default function IncomeSourceDetailsPage() {
     const incomeId = params.incomeId as string;
     const { toast } = useToast();
     const [authUser, authLoading] = useAuthState(auth);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [editingTransaction, setEditingTransaction] = useState<IncomeRecord | null>(null);
 
     const form = useForm<TransactionFormValues>({
         resolver: zodResolver(transactionSchema),
@@ -93,20 +97,51 @@ export default function IncomeSourceDetailsPage() {
 
     const onSubmit = async (data: TransactionFormValues) => {
         if (!authUser || !source) return;
+        
+        const transactionData: IncomeFormValues = {
+            ...data,
+            category: source.category,
+            accountId: source.accountId || '',
+        };
+
         try {
-            const transactionData: IncomeFormValues = {
-                ...data,
-                category: source.category,
-                accountId: source.accountId || '',
-            };
-            await addIncomeTransaction(transactionData, incomeId, authUser.uid, authUser.email);
-            toast({ title: "Success", description: "Transaction recorded." });
+            if (editingTransaction) {
+                await updateIncomeTransaction(editingTransaction.id, transactionData, authUser.uid, authUser.email);
+                toast({ title: "Success", description: "Transaction updated." });
+                setIsEditDialogOpen(false);
+            } else {
+                await addIncomeTransaction(transactionData, incomeId, authUser.uid, authUser.email);
+                toast({ title: "Success", description: "Transaction recorded." });
+            }
             form.reset({ code: "", transactionName: "", date: new Date(), amount: 0, description: "" });
+            setEditingTransaction(null);
         } catch (error: any) {
-            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record transaction." });
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to save transaction." });
         }
     };
     
+    const handleDelete = async (transactionId: string) => {
+        if (!authUser) return;
+        try {
+            await deleteIncomeTransaction(transactionId, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Transaction deleted." });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to delete transaction." });
+        }
+    };
+
+    const openEditDialog = (transaction: IncomeRecord) => {
+        setEditingTransaction(transaction);
+        form.reset({
+            code: transaction.code,
+            transactionName: transaction.transactionName,
+            date: transaction.date,
+            amount: transaction.amount,
+            description: transaction.description || "",
+        });
+        setIsEditDialogOpen(true);
+    };
+
     const formatCurrency = (value: number) => {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
     };
@@ -217,6 +252,7 @@ export default function IncomeSourceDetailsPage() {
                                             <TableHead>Code</TableHead>
                                             <TableHead>Name</TableHead>
                                             <TableHead className="text-right">Amount</TableHead>
+                                            <TableHead className="text-right">Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -226,6 +262,24 @@ export default function IncomeSourceDetailsPage() {
                                                 <TableCell>{tx.code}</TableCell>
                                                 <TableCell>{tx.transactionName}</TableCell>
                                                 <TableCell className="text-right">{formatCurrency(tx.amount)}</TableCell>
+                                                <TableCell className="text-right space-x-1">
+                                                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(tx)}><Edit className="h-4 w-4" /></Button>
+                                                    <AlertDialog>
+                                                        <AlertDialogTrigger asChild>
+                                                            <Button variant="ghost" size="icon"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                                        </AlertDialogTrigger>
+                                                        <AlertDialogContent>
+                                                            <AlertDialogHeader>
+                                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                                <AlertDialogDescription>This will permanently delete the transaction "{tx.transactionName}".</AlertDialogDescription>
+                                                            </AlertDialogHeader>
+                                                            <AlertDialogFooter>
+                                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                                <AlertDialogAction onClick={() => handleDelete(tx.id)}>Delete</AlertDialogAction>
+                                                            </AlertDialogFooter>
+                                                        </AlertDialogContent>
+                                                    </AlertDialog>
+                                                </TableCell>
                                             </TableRow>
                                         ))}
                                     </TableBody>
@@ -237,6 +291,52 @@ export default function IncomeSourceDetailsPage() {
                     </CardContent>
                 </Card>
             </div>
+            
+            <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit Transaction</DialogTitle>
+                        <DialogDescription>Update the details for this income transaction.</DialogDescription>
+                    </DialogHeader>
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
+                            {/* The form fields are the same as the add form */}
+                            <FormField control={form.control} name="date" render={({ field }) => (
+                                <FormItem className="flex flex-col"><FormLabel>Date</FormLabel>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date()} initialFocus /></PopoverContent>
+                                    </Popover>
+                                <FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="code" render={({ field }) => (
+                                <FormItem><FormLabel>Transaction Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="transactionName" render={({ field }) => (
+                                <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="amount" render={({ field }) => (
+                                <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="description" render={({ field }) => (
+                                <FormItem><FormLabel>Description</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <DialogFooter>
+                                <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                                <Button type="submit" disabled={form.formState.isSubmitting}>
+                                    {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                                    Save Changes
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
+
         </div>
     );
 }
+
+    
