@@ -19,7 +19,7 @@ const formatCurrency = (val: number | null | undefined) => {
 
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
     const csvData: any[] = [];
-    const headers = ['Type', 'Description', 'Budget', 'Realized', '% Realized', 'Date', 'Amount'];
+    const headers = ['Level', 'Code', 'Name', 'Category/Type', 'Budget', 'Realized', '% Realized'];
     csvData.push(headers);
 
     const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
@@ -34,31 +34,32 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
     const filteredIncomeRecords = filterByDate(incomeRecords);
     const filteredExpenseRecords = filterByDate(expenseRecords);
 
-    const grouped: Record<string, any[]> = {};
-    accounts.forEach(d => {
-        if (!grouped[d.type]) grouped[d.type] = [];
-        grouped[d.type].push(d);
-    });
-
     typeOrder.forEach(type => {
-        if (grouped[type]) {
-            csvData.push([type.toUpperCase()]);
-            grouped[type].forEach((account: Account) => {
+        const relevantAccounts = accounts.filter(acc => acc.type === type);
+        if (relevantAccounts.length > 0) {
+            csvData.push([type.toUpperCase()]); // Main Type Header
+            relevantAccounts.forEach((account: Account) => {
                 const accountBudget = account.budgets?.[budgetYear || ''] || 0;
+                
                 const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                 const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
+                
                 const incomeFromDirectRecords = filteredIncomeRecords.filter(r => r.accountId === account.id && !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
                 const expenseFromDirectRecords = filteredExpenseRecords.filter(r => r.accountId === account.id && !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+
                 const realizedFromSources = (type === 'Income' ? relevantIncomeSources : relevantExpenseSources).reduce((sum, source) => {
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
                     return sum + records.reduce((s, r) => s + r.amount, 0);
                 }, 0);
+
                 const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
                 const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                 
                 csvData.push([
                     'Account',
-                    `${account.code} - ${account.name}`,
+                    account.code,
+                    account.name,
+                    account.type,
                     accountBudget,
                     accountRealized,
                     `${accountPercentage.toFixed(1)}%`
@@ -72,24 +73,14 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                     const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
 
                     csvData.push([
-                        'Sub-Account',
-                        `  ${source.code} - ${'transactionName' in source ? source.transactionName : source.expenseName}`,
+                        '  Sub-Account', // Indented for hierarchy
+                        source.code,
+                        'transactionName' in source ? source.transactionName : source.expenseName,
+                        source.category,
                         sourceBudget,
                         sourceRealized,
                         `${sourcePercentage.toFixed(1)}%`
                     ]);
-
-                    records.forEach(tx => {
-                         csvData.push([
-                            'Transaction',
-                            `    ${(tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName}`,
-                            '',
-                            '',
-                            '',
-                            format(tx.date, 'PP'),
-                            tx.amount,
-                        ]);
-                    });
                 });
             });
         }
@@ -108,7 +99,7 @@ export const downloadCsv = (data: any[], reportTitle: string, reportType: string
     let ws;
     if (reportType === 'budget_vs_actuals' || reportType === 'balance_sheet') {
         const hierarchicalData = generateHierarchicalDataForCsv(data, options);
-        ws = utils.aoa_to_sheet(hierarchicalData);
+        ws = utils.aoa_to_sheet(hierarchicalData, { skipHeader: true }); // We created custom headers
     } else {
         const { headers, body } = getHeadersAndRows(data, reportType, options);
         const csvData = [headers[0]].concat(body);
@@ -216,7 +207,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
 
              typeOrder.forEach(type => {
                  if (grouped[type]) {
-                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#F2EAE2', textColor: '#2A4035' } }]);
+                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED' } }]);
                      
                      grouped[type].forEach((account: Account) => {
                          const accountBudget = account.budgets?.[options.budgetYear || ''] || 0;
@@ -339,7 +330,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
             },
             styles: { 
                 fontSize: 9, 
-                cellPadding: 4,
+                cellPadding: 6, // Increased padding
                 lineWidth: 0.2,
                 lineColor: '#DCD0C3' // --border
             },
@@ -360,7 +351,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
                 fontSize: 10,
                 fontStyle: 'bold'
             },
-            styles: { fontSize: 9, cellPadding: 4 },
+            styles: { fontSize: 9, cellPadding: 6 }, // Increased padding
             alternateRowStyles: { fillColor: '#FAF5F0' }, // --popover
             didDrawPage: (data) => {
                 addHeader(data.pageNumber);
@@ -383,3 +374,5 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     addFooter();
     doc.save(fileName);
 };
+
+    
