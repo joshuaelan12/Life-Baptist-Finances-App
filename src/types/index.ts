@@ -58,9 +58,6 @@ export const incomeSchema = z.object({
   accountId: z.string().min(1, { message: "Account is required." }),
   description: z.string().optional(),
   memberName: z.string().optional(),
-}).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
-  message: "Member name is required for tithes.",
-  path: ["memberName"],
 });
 export type IncomeFormValues = z.infer<typeof incomeSchema>;
 
@@ -183,7 +180,7 @@ export interface ExpenseSource {
 // For Expense transaction validation
 export const expenseRecordSchema = z.object({
   code: z.string().min(1, { message: "Transaction code is required." }),
-  expenseName: z.string().min(1, "Transaction name is required."),
+  expenseName: z.string().min(1, { message: "Transaction name is required." }),
   date: z.date({ required_error: "Date is required." }),
   amount: z.coerce.number().positive({ message: "Amount must be positive." }),
   payee: z.string().optional(),
@@ -221,7 +218,7 @@ export interface ExpenseRecord {
   payee?: string;
   paymentMethod?: string;
   description?: string;
-  recordedByUserId: string;
+  recordedByUserId?: string;
   createdAt?: Date;
   accountId?: string;
   expenseSourceId?: string;
@@ -344,5 +341,3 @@ export interface AccountFirestore {
   createdAt: Timestamp;
   recordedByUserId: string;
 }
-
-    

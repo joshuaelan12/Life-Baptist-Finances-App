@@ -4,7 +4,7 @@ import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import type { UserOptions } from 'jspdf-autotable';
-import type { AccountType } from '@/types';
+import type { AccountType, IncomeRecord, ExpenseRecord, Account } from '@/types';
 
 // Extend jsPDF with autoTable
 interface jsPDFWithAutoTable extends jsPDF {
@@ -28,6 +28,10 @@ export const downloadCsv = (data: any[], reportTitle: string) => {
 interface ReportOptions {
     budgetYear?: number;
     periodString?: string;
+    incomeRecords?: IncomeRecord[];
+    expenseRecords?: ExpenseRecord[];
+    startDate?: Date;
+    endDate?: Date;
 }
 
 const formatCurrency = (val: number | null | undefined) => {
@@ -96,28 +100,82 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
         case 'budget_vs_actuals':
         case 'balance_sheet':
             const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
-            const grouped: Record<string, any[]> = {};
-            data.forEach(d => {
-                if (!grouped[d.Type]) grouped[d.Type] = [];
-                grouped[d.Type].push(d);
-            });
+            const accounts = data as Account[];
+            const { incomeRecords = [], expenseRecords = [], startDate, endDate } = options;
+
+            const realizedAmounts: Record<string, number> = {};
+            const accountTransactions: Record<string, (IncomeRecord | ExpenseRecord)[]> = {};
+
+             const filterAndProcess = (records: (IncomeRecord | ExpenseRecord)[]) => {
+                records.filter(r => r.accountId && startDate && endDate && r.date >= startDate && r.date <= endDate)
+                .forEach(r => {
+                    realizedAmounts[r.accountId!] = (realizedAmounts[r.accountId!] || 0) + r.amount;
+                    if (!accountTransactions[r.accountId!]) {
+                        accountTransactions[r.accountId!] = [];
+                    }
+                    accountTransactions[r.accountId!].push(r);
+                });
+            };
+
+            filterAndProcess(incomeRecords);
+            filterAndProcess(expenseRecords);
             
             headers.push(['A/C#', 'A/C NAME', `Budget for ${options.budgetYear}`, `Realized: ${options.periodString}`, '% Realized']);
 
+            const grouped: Record<string, any[]> = {};
+            accounts.forEach(d => {
+                if (!grouped[d.type]) grouped[d.type] = [];
+                grouped[d.type].push(d);
+            });
+
             typeOrder.forEach(type => {
                 if (grouped[type]) {
-                    body.push([{ content: type, colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#EAEAEA' } }]);
-                    grouped[type].forEach(item => {
-                        const budget = item['Budget'];
-                        const realized = item['Realized'];
+                    body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#e2e8f0', textColor: '#1e293b' } }]);
+                    grouped[type].forEach(account => {
+                        const budget = account.budgets?.[options.budgetYear || ''] || 0;
+                        const realized = realizedAmounts[account.id] || 0;
                         const percentage = budget > 0 ? (realized / budget) * 100 : 0;
                         body.push([
-                            item['A/C#'],
-                            item['A/C NAME'],
+                            account.code,
+                            account.name,
                             formatCurrency(budget),
                             formatCurrency(realized),
                             `${percentage.toFixed(1)}%`
                         ]);
+
+                        // Add sub-table for transactions
+                        const transactions = accountTransactions[account.id];
+                        if (transactions && transactions.length > 0) {
+                            const subTableBody = transactions.map(tx => {
+                                const isIncome = 'memberName' in tx || tx.category === 'Tithe' || tx.category === 'Donation' || tx.category === 'Offering';
+                                return [
+                                    '', // Indent
+                                    format(tx.date, 'dd/MM/yy'),
+                                    (tx as IncomeRecord).transactionName || (tx as ExpenseRecord).expenseName || 'N/A',
+                                    isIncome ? 'Income' : 'Expense',
+                                    formatCurrency(tx.amount)
+                                ];
+                            });
+
+                            const subTable = {
+                                head: [['', 'Date', 'Description', 'Type', 'Amount']],
+                                body: subTableBody,
+                                theme: 'grid' as const,
+                                styles: { fontSize: 8, cellPadding: 1.5, halign: 'right' as const },
+                                headStyles: { fillColor: '#f8fafc', textColor: '#475569', fontStyle: 'bold' as const, lineWidth: 0.1 },
+                                columnStyles: {
+                                    0: { cellWidth: 10 },
+                                    1: { halign: 'left' as const },
+                                    2: { halign: 'left' as const },
+                                    3: { halign: 'left' as const },
+                                }
+                            };
+                             body.push([{
+                                content: '', // This row will be replaced by autoTable in downloadPdf
+                                _subTable: subTable, // Custom property to carry sub-table data
+                                colSpan: 5
+                            }]);
+                        }
                     });
                 }
             });
@@ -164,9 +222,11 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
 
     let finalY = (doc as any).lastAutoTable.finalY || 35;
 
+    const isDetailedReport = reportType === 'budget_vs_actuals' || reportType === 'balance_sheet';
+
     doc.autoTable({
         head: headers,
-        body: body,
+        body: body.filter(row => !row[0]?._subTable), // Filter out sub-table placeholder rows
         startY: 35,
         headStyles: {
             fillColor: [52, 111, 79], // #346F4F - Primary Theme Color
@@ -178,6 +238,20 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         },
         alternateRowStyles: {
             fillColor: [247, 242, 237] // #F7F2ED - Card Color
+        },
+        // This is the magic part for hierarchical reports
+        didDrawCell: (hookData) => {
+            if (isDetailedReport && hookData.section === 'body') {
+                 const row = body[hookData.row.index];
+                 const subTableData = row[0]?._subTable;
+                 if (subTableData) {
+                    doc.autoTable({
+                        ...subTableData,
+                        startY: hookData.cell.y + hookData.cell.height,
+                        margin: { left: hookData.cell.x + hookData.cell.padding('left') }
+                    });
+                 }
+            }
         },
         didDrawPage: (data) => {
             finalY = data.cursor?.y ?? 35;
@@ -199,5 +273,3 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
 
     doc.save(fileName);
 };
-
-    

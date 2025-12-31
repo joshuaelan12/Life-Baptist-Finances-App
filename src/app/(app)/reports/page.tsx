@@ -36,6 +36,7 @@ const incomeConverter = {
       category: data.category,
       amount: data.amount,
       description: data.description,
+      transactionName: data.transactionName,
       memberName: data.memberName,
       recordedByUserId: data.recordedByUserId,
       createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
@@ -50,6 +51,7 @@ const expenseConverter = {
     return {
       id: snapshot.id,
       code: data.code,
+      expenseName: data.expenseName,
       date: data.date instanceof Timestamp ? data.date.toDate() : new Date(),
       category: data.category, amount: data.amount, description: data.description,
       payee: data.payee, paymentMethod: data.paymentMethod, recordedByUserId: data.recordedByUserId,
@@ -76,7 +78,7 @@ export default function ReportsPage() {
   const { toast } = useToast();
   const [authUser, authLoading, authError] = useAuthState(auth);
 
-  const [reportType, setReportType] = useState<ReportType>("summary");
+  const [reportType, setReportType] = useState<ReportType>("budget_vs_actuals");
   const [periodType, setPeriodType] = useState<PeriodType>("monthly");
   const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange | undefined>({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) });
@@ -87,10 +89,10 @@ export default function ReportsPage() {
 
   const [titheMemberSearch, setTitheMemberSearch] = useState('');
 
-  const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
-  const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
+  const [incomeRecords, loadingIncome] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
+  const [expenseRecords, loadingExpenses] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
   const [accounts, loadingAccounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
-  const [members] = useCollectionData(collection(db, 'members'));
+  const [members, loadingMembers] = useCollectionData(collection(db, 'members'));
   
   const accountsMap = useMemo(() => {
     if (!accounts) return new Map<string, Account>();
@@ -141,6 +143,15 @@ export default function ReportsPage() {
       let rawData: any[] = [];
       let reportTitle = "";
 
+      const reportOptions = { 
+          budgetYear, 
+          periodString, 
+          incomeRecords: incomeRecords || [], 
+          expenseRecords: expenseRecords || [],
+          startDate,
+          endDate,
+      };
+
       switch (reportType) {
         case 'income':
           reportTitle = `Income Report ${periodString}`;
@@ -169,27 +180,7 @@ export default function ReportsPage() {
         case 'budget_vs_actuals':
         case 'balance_sheet':
           reportTitle = reportType === 'balance_sheet' ? `Balance Sheet as of ${format(endDate || new Date(), "PPP")}` : `Budget vs. Actuals ${periodString}`;
-          const realizedAmounts: Record<string, number> = {};
-          
-          (incomeRecords || [])
-            .filter(r => r.accountId && startDate && endDate && r.date >= startDate && r.date <= endDate)
-            .forEach(r => {
-                realizedAmounts[r.accountId!] = (realizedAmounts[r.accountId!] || 0) + r.amount;
-            });
-          
-          (expenseRecords || [])
-            .filter(r => r.accountId && startDate && endDate && r.date >= startDate && r.date <= endDate)
-            .forEach(r => {
-                realizedAmounts[r.accountId!] = (realizedAmounts[r.accountId!] || 0) + r.amount;
-            });
-
-          rawData = (accounts || []).map(acc => ({
-            'A/C#': acc.code,
-            'A/C NAME': acc.name,
-            'Type': acc.type,
-            'Budget': acc.budgets?.[budgetYear] || 0,
-            'Realized': realizedAmounts[acc.id] || 0,
-          }));
+          rawData = accounts || [];
           break;
       }
       
@@ -206,7 +197,7 @@ export default function ReportsPage() {
       if (formatType === 'csv') {
         downloadCsv(finalData, reportTitle);
       } else {
-        downloadPdf(finalData, reportTitle, reportType, { budgetYear, periodString });
+        downloadPdf(rawData, reportTitle, reportType, reportOptions);
       }
 
       toast({ title: "Success", description: `Report has been prepared for download.` });
@@ -235,7 +226,7 @@ export default function ReportsPage() {
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
 
-  if (authLoading || loadingAccounts) {
+  if (authLoading || loadingAccounts || loadingIncome || loadingExpenses || loadingMembers) {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
   if (authError) {
@@ -470,5 +461,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
-    
