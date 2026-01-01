@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDocumentData } from 'react-firebase-hooks/firestore';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { format } from 'date-fns';
+import { format, startOfYear, endOfYear } from 'date-fns';
 
 const accountConverter = {
     fromFirestore: (snapshot: any): Account => {
@@ -50,20 +50,35 @@ type MergedTransaction = {
 export default function AccountDetailsPage() {
     const router = useRouter();
     const params = useParams();
+    const searchParams = useSearchParams();
     const accountId = params.accountId as string;
+    const year = searchParams.get('year') ? parseInt(searchParams.get('year') as string) : new Date().getFullYear();
 
     const [account, loadingAccount, errorAccount] = useDocumentData(
         accountId ? doc(db, 'accounts', accountId).withConverter(accountConverter) : null
     );
+    
+    const yearStart = startOfYear(new Date(year, 0, 1));
+    const yearEnd = endOfYear(new Date(year, 11, 31));
 
     const incomeQuery = useMemo(() => 
-        accountId ? query(collection(db, 'income_records'), where('accountId', '==', accountId)).withConverter(transactionConverter) : null, 
-    [accountId]);
+        accountId ? query(
+            collection(db, 'income_records'), 
+            where('accountId', '==', accountId),
+            where('date', '>=', yearStart),
+            where('date', '<=', yearEnd)
+        ).withConverter(transactionConverter) : null, 
+    [accountId, yearStart, yearEnd]);
     const [incomeRecords, loadingIncome, errorIncome] = useCollectionData(incomeQuery);
 
     const expenseQuery = useMemo(() => 
-        accountId ? query(collection(db, 'expense_records'), where('accountId', '==', accountId)).withConverter(transactionConverter) : null, 
-    [accountId]);
+        accountId ? query(
+            collection(db, 'expense_records'), 
+            where('accountId', '==', accountId),
+            where('date', '>=', yearStart),
+            where('date', '<=', yearEnd)
+        ).withConverter(transactionConverter) : null, 
+    [accountId, yearStart, yearEnd]);
     const [expenseRecords, loadingExpenses, errorExpenses] = useCollectionData(expenseQuery);
 
     const transactions = useMemo(() => {
@@ -73,7 +88,7 @@ export default function AccountDetailsPage() {
             allTransactions.push({
                 id: record.id,
                 date: record.date,
-                description: (record as IncomeRecord).description || `Income: ${(record as IncomeRecord).category}`,
+                description: (record as IncomeRecord).transactionName || `Income: ${(record as IncomeRecord).category}`,
                 type: 'Income',
                 amount: record.amount,
             });
@@ -83,7 +98,7 @@ export default function AccountDetailsPage() {
             allTransactions.push({
                 id: record.id,
                 date: record.date,
-                description: (record as ExpenseRecord).description || `Expense: ${(record as ExpenseRecord).category}`,
+                description: (record as ExpenseRecord).expenseName || `Expense: ${(record as ExpenseRecord).category}`,
                 type: 'Expense',
                 amount: record.amount,
             });
@@ -130,27 +145,27 @@ export default function AccountDetailsPage() {
                         <BookOpen className="h-8 w-8 text-primary" />
                         <span>{account.code} - {account.name}</span>
                     </CardTitle>
-                    <CardDescription>Ledger for account type: {account.type}</CardDescription>
+                    <CardDescription>Ledger for account type: {account.type} | Year: {year}</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-3">
                      <div className="flex items-center space-x-4 rounded-md border p-4">
                         <TrendingUp className="h-8 w-8 text-emerald-500" />
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Total Income</p>
+                          <p className="text-sm font-medium leading-none">Total Income ({year})</p>
                           <p className="text-xl font-semibold">{formatCurrency(summary.totalIncome)}</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-4 rounded-md border p-4">
                         <TrendingDown className="h-8 w-8 text-red-500" />
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Total Expenses</p>
+                          <p className="text-sm font-medium leading-none">Total Expenses ({year})</p>
                           <p className="text-xl font-semibold">{formatCurrency(summary.totalExpenses)}</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-4 rounded-md border p-4">
                         <Scale className={`h-8 w-8 ${summary.netBalance >= 0 ? 'text-primary' : 'text-destructive'}`} />
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Net Balance</p>
+                          <p className="text-sm font-medium leading-none">Net Balance ({year})</p>
                           <p className="text-xl font-semibold">{formatCurrency(summary.netBalance)}</p>
                         </div>
                       </div>
@@ -159,8 +174,8 @@ export default function AccountDetailsPage() {
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Transactions</CardTitle>
-                    <CardDescription>All transactions recorded under this account.</CardDescription>
+                    <CardTitle>Transactions for {year}</CardTitle>
+                    <CardDescription>All transactions recorded under this account for the selected year.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {transactions.length > 0 ? (
@@ -193,7 +208,7 @@ export default function AccountDetailsPage() {
                             </Table>
                         </div>
                     ) : (
-                        <p className="text-center text-muted-foreground py-10">No transactions recorded for this account yet.</p>
+                        <p className="text-center text-muted-foreground py-10">No transactions recorded for this account in {year}.</p>
                     )}
                 </CardContent>
             </Card>

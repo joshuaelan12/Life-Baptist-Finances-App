@@ -370,7 +370,7 @@ export default function IncomePage() {
                       return (
                           <TableRow key={source.id}>
                               <TableCell>{source.code}</TableCell>
-                              <TableCell><Link href={`/income/${source.id}`} className="hover:underline text-primary font-medium">{source.transactionName}</Link></TableCell>
+                              <TableCell><Link href={`/income/${source.id}?year=${selectedYear}`} className="hover:underline text-primary font-medium">{source.transactionName}</Link></TableCell>
                               <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
                               <TableCell>{source.category}</TableCell>
                               <TableCell>{formatCurrency(budget)}</TableCell>

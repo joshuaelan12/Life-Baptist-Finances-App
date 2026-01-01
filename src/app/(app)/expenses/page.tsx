@@ -66,7 +66,7 @@ const accountConverter = {
 
 export default function ExpensesPage() {
   const { toast } = useToast();
-  const [authUser, authLoading, authError] = useAuthState(auth);
+  const [authUser, authLoading] = useAuthState(auth);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBudgetDialogOpen, setIsBudgetDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -207,7 +207,7 @@ export default function ExpensesPage() {
   const pastYearOptions = Array.from({length: 5}, (_, i) => new Date().getFullYear() - i);
   
   const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords;
-  const dataError = authError || errorSources || errorAccounts || errorRecords;
+  const dataError = errorSources || errorAccounts || errorRecords;
 
   if (isLoading) {
     return (
@@ -340,7 +340,7 @@ export default function ExpensesPage() {
                       return (
                         <TableRow key={source.id}>
                           <TableCell>{source.code}</TableCell>
-                          <TableCell><Link href={`/expenses/${source.id}`} className="hover:underline text-primary font-medium">{source.expenseName}</Link></TableCell>
+                          <TableCell><Link href={`/expenses/${source.id}?year=${selectedYear}`} className="hover:underline text-primary font-medium">{source.expenseName}</Link></TableCell>
                           <TableCell>{account ? `${account.code} - ${account.name}` : 'N/A'}</TableCell>
                           <TableCell>{source.category}</TableCell>
                           <TableCell>{formatCurrency(budget)}</TableCell>

@@ -298,7 +298,7 @@ export default function AccountsPage() {
                                             <TableRow key={account.id}>
                                                 <TableCell>{account.code}</TableCell>
                                                 <TableCell>
-                                                    <Link href={`/accounts/${account.id}`} className="hover:underline text-primary font-medium">
+                                                    <Link href={`/accounts/${account.id}?year=${selectedYear}`} className="hover:underline text-primary font-medium">
                                                         {account.name}
                                                     </Link>
                                                 </TableCell>

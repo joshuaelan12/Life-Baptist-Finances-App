@@ -2,9 +2,9 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
-import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import { doc, collection, query, where, orderBy, Timestamp, startOfYear, endOfYear } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
 import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2 } from 'lucide-react';
@@ -65,7 +65,10 @@ type TransactionFormValues = z.infer<typeof transactionSchema>;
 export default function IncomeSourceDetailsPage() {
     const router = useRouter();
     const params = useParams();
+    const searchParams = useSearchParams();
     const incomeId = params.incomeId as string;
+    const year = searchParams.get('year') ? parseInt(searchParams.get('year') as string) : new Date().getFullYear();
+
     const { toast } = useToast();
     const [authUser, authLoading] = useAuthState(auth);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -86,9 +89,18 @@ export default function IncomeSourceDetailsPage() {
         incomeId ? doc(db, 'income_sources', incomeId).withConverter(incomeSourceConverter) : null
     );
 
+    const yearStart = startOfYear(new Date(year, 0, 1));
+    const yearEnd = endOfYear(new Date(year, 11, 31));
+
     const transactionsQuery = useMemo(() => 
-        incomeId ? query(collection(db, 'income_records'), where('incomeSourceId', '==', incomeId), orderBy('date', 'desc')).withConverter(incomeTransactionConverter) : null, 
-    [incomeId]);
+        incomeId ? query(
+            collection(db, 'income_records'), 
+            where('incomeSourceId', '==', incomeId),
+            where('date', '>=', yearStart),
+            where('date', '<=', yearEnd),
+            orderBy('date', 'desc')
+        ).withConverter(incomeTransactionConverter) : null, 
+    [incomeId, yearStart, yearEnd]);
     const [transactions, loadingTransactions, errorTransactions] = useCollectionData(transactionsQuery);
 
     const totalRealized = useMemo(() => {
@@ -143,7 +155,7 @@ export default function IncomeSourceDetailsPage() {
     };
 
     const formatCurrency = (value: number) => {
-        return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
+        return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
     const isLoading = loadingSource || loadingTransactions || authLoading;
@@ -161,7 +173,8 @@ export default function IncomeSourceDetailsPage() {
         return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Found</AlertTitle><AlertDescription>The requested income source could not be found.</AlertDescription></Alert>;
     }
     
-    const percentageRealized = source.budget && source.budget > 0 ? (totalRealized / source.budget) * 100 : 0;
+    const budgetForYear = source.budgets?.[year] || (year === 2025 ? source.budget : 0) || 0;
+    const percentageRealized = budgetForYear > 0 ? (totalRealized / budgetForYear) * 100 : 0;
 
     return (
         <div className="space-y-6">
@@ -175,18 +188,18 @@ export default function IncomeSourceDetailsPage() {
                         <DollarSign className="h-8 w-8 text-primary" />
                         <span>{source.code} - {source.transactionName}</span>
                     </CardTitle>
-                    <CardDescription>Category: {source.category}</CardDescription>
+                    <CardDescription>Category: {source.category} | Year: {year}</CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-3">
                      <div className="flex items-center space-x-4 rounded-md border p-4">
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Annual Budget</p>
-                          <p className="text-xl font-semibold">{formatCurrency(source.budget || 0)}</p>
+                          <p className="text-sm font-medium leading-none">Annual Budget ({year})</p>
+                          <p className="text-xl font-semibold">{formatCurrency(budgetForYear)}</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-4 rounded-md border p-4">
                         <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Total Realized</p>
+                          <p className="text-sm font-medium leading-none">Total Realized ({year})</p>
                           <p className="text-xl font-semibold">{formatCurrency(totalRealized)}</p>
                         </div>
                       </div>
@@ -201,7 +214,7 @@ export default function IncomeSourceDetailsPage() {
 
             <div className="grid md:grid-cols-2 gap-6">
                 <Card>
-                    <CardHeader><CardTitle>Add New Transaction</CardTitle></CardHeader>
+                    <CardHeader><CardTitle>Add New Transaction for {year}</CardTitle></CardHeader>
                     <CardContent>
                         <Form {...form}>
                             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -217,7 +230,7 @@ export default function IncomeSourceDetailsPage() {
                                                 </FormControl>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date()} initialFocus />
+                                                <Calendar mode="single" selected={field.value} onSelect={field.onChange} defaultMonth={new Date(year, 0, 1)} fromDate={yearStart} toDate={yearEnd} initialFocus />
                                             </PopoverContent>
                                         </Popover>
                                     <FormMessage /></FormItem>
@@ -240,7 +253,7 @@ export default function IncomeSourceDetailsPage() {
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader><CardTitle>Recorded Transactions</CardTitle></CardHeader>
+                    <CardHeader><CardTitle>Recorded Transactions for {year}</CardTitle></CardHeader>
                     <CardContent>
                         {loadingTransactions ? <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
                         : transactions && transactions.length > 0 ? (
@@ -286,7 +299,7 @@ export default function IncomeSourceDetailsPage() {
                                 </Table>
                             </div>
                         ) : (
-                            <p className="text-center text-muted-foreground py-10">No transactions recorded yet.</p>
+                            <p className="text-center text-muted-foreground py-10">No transactions recorded yet for {year}.</p>
                         )}
                     </CardContent>
                 </Card>
@@ -307,7 +320,7 @@ export default function IncomeSourceDetailsPage() {
                                         <PopoverTrigger asChild>
                                             <FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date > new Date()} initialFocus /></PopoverContent>
+                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} defaultMonth={new Date(year, 0, 1)} fromDate={yearStart} toDate={yearEnd} initialFocus /></PopoverContent>
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
