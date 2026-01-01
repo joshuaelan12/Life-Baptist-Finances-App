@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search } from "lucide-react";
-import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, startOfYear } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -319,7 +319,7 @@ export default function ReportsPage() {
                         onSelect={(d) => d && setSelectedMonth(d)}
                         initialFocus
                         captionLayout="dropdown-buttons"
-                        fromYear={2020}
+                        fromYear={startOfYear(subMonths(new Date(), 60)).getFullYear()}
                         toYear={new Date().getFullYear()}
                       />
                     </PopoverContent>
@@ -476,3 +476,5 @@ export default function ReportsPage() {
     </div>
   );
 }
+
+    
