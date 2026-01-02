@@ -17,17 +17,29 @@ import type { IdentifyFinancialTrendsOutput } from '@/ai/flows/identify-financia
 const incomeConverter = {
     fromFirestore: (snapshot: any): IncomeRecord => {
         const data = snapshot.data();
-        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate() } as IncomeRecord;
+        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate(), createdAt: (data.createdAt as Timestamp)?.toDate() } as IncomeRecord;
     },
     toFirestore: (record: IncomeRecord) => record,
 }
 const expenseConverter = {
     fromFirestore: (snapshot: any): ExpenseRecord => {
         const data = snapshot.data();
-        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate() } as ExpenseRecord;
+        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate(), createdAt: (data.createdAt as Timestamp)?.toDate() } as ExpenseRecord;
     },
     toFirestore: (record: ExpenseRecord) => record,
 }
+
+// Helper to convert records to plain objects
+const toPlainObject = (record: any) => {
+    const plain = { ...record };
+    if (plain.date instanceof Date) {
+        plain.date = plain.date.toISOString();
+    }
+    if (plain.createdAt instanceof Date) {
+        plain.createdAt = plain.createdAt.toISOString();
+    }
+    return plain;
+};
 
 
 export default function AdminDashboardPage() {
@@ -64,9 +76,13 @@ export default function AdminDashboardPage() {
     }
     
     try {
+        // Convert the complex objects to plain objects before sending
+        const plainIncomeRecords = incomeRecords.map(toPlainObject);
+        const plainExpenseRecords = expenseRecords.map(toPlainObject);
+
         const result = await identifyFinancialTrends({
-            incomeRecords: incomeRecords,
-            expenseRecords: expenseRecords,
+            incomeRecords: plainIncomeRecords,
+            expenseRecords: plainExpenseRecords,
         });
         setAnalysisResult(result);
     } catch (error: any) {
@@ -128,7 +144,11 @@ export default function AdminDashboardPage() {
                   <CardTitle className="flex items-center gap-2 text-lg"><Wand2 className="h-5 w-5 text-accent"/> Key Trends</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="whitespace-pre-wrap text-sm">{analysisResult.trends}</p>
+                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                    {analysisResult.trends.split(/•|-/g).filter(s => s.trim()).map((item, index) => (
+                      <li key={index}>{item.trim()}</li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
               <Card>
@@ -136,7 +156,11 @@ export default function AdminDashboardPage() {
                   <CardTitle className="flex items-center gap-2 text-lg"><Sparkles className="h-5 w-5 text-accent"/> Actionable Insights</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="whitespace-pre-wrap text-sm">{analysisResult.insights}</p>
+                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                    {analysisResult.insights.split(/•|-/g).filter(s => s.trim()).map((item, index) => (
+                      <li key={index}>{item.trim()}</li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
               <Card>
@@ -144,7 +168,11 @@ export default function AdminDashboardPage() {
                   <CardTitle className="flex items-center gap-2 text-lg"><ShieldCheck className="h-5 w-5 text-accent"/> Strategic Recommendations</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="whitespace-pre-wrap text-sm">{analysisResult.recommendations}</p>
+                  <ul className="list-disc pl-5 space-y-2 text-sm">
+                    {analysisResult.recommendations.split(/•|-/g).filter(s => s.trim()).map((item, index) => (
+                      <li key={index}>{item.trim()}</li>
+                    ))}
+                  </ul>
                 </CardContent>
               </Card>
             </div>
