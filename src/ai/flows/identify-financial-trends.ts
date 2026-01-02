@@ -11,6 +11,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import {googleAI} from '@genkit-ai/googleai';
 
 const IdentifyFinancialTrendsInputSchema = z.object({
   financialData: z.string().describe('The church financial data in JSON format. Include the last 12 months of income and expenses.'),
@@ -32,6 +33,7 @@ const prompt = ai.definePrompt({
   name: 'identifyFinancialTrendsPrompt',
   input: {schema: IdentifyFinancialTrendsInputSchema},
   output: {schema: IdentifyFinancialTrendsOutputSchema},
+  model: googleAI('gemini-pro'),
   prompt: `You are a financial analyst specializing in identifying trends and insights from financial data.
 
 You will use the provided financial data to identify key trends in giving patterns over the past year, provide insights for financial planning, and offer recommendations for budgeting and resource allocation.

@@ -12,6 +12,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
+import {googleAI} from '@genkit-ai/googleai';
 
 const GenerateFinancialReportInputSchema = z.object({
   financialData: z
@@ -41,6 +42,7 @@ const prompt = ai.definePrompt({
   name: 'generateFinancialReportPrompt',
   input: {schema: GenerateFinancialReportInputSchema},
   output: {schema: GenerateFinancialReportOutputSchema},
+  model: googleAI('gemini-pro'),
   prompt: `You are a financial expert. Generate a summary report of the financial data from the past quarter.
 
   Financial Data: {{{financialData}}} `,
