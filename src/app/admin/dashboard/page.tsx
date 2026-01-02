@@ -1,96 +1,79 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ShieldCheck, BrainCircuit, Users, Link2Off, HelpCircle, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, BrainCircuit, Loader2, AlertTriangle, Sparkles, Wand2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection } from 'firebase/firestore';
-import type { IncomeRecord, ExpenseRecord, IncomeSource, ExpenseSource, UserProfile, Account } from '@/types';
+import { collection, query, where, Timestamp, startOfYear, endOfYear, sub } from 'firebase/firestore';
+import { identifyFinancialTrends } from '@/ai/flows/identify-financial-trends';
+import type { IncomeRecord, ExpenseRecord, FinancialTrendsOutput } from '@/types';
 
-type IntegrityCheckResult = {
-    orphanedIncomeRecords: IncomeRecord[];
-    orphanedExpenseRecords: ExpenseRecord[];
-    uncategorizedIncome: IncomeRecord[];
-    uncategorizedExpenses: ExpenseRecord[];
-    userCount: number;
-};
+const incomeConverter = {
+    fromFirestore: (snapshot: any): IncomeRecord => {
+        const data = snapshot.data();
+        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate() } as IncomeRecord;
+    },
+    toFirestore: (record: IncomeRecord) => record,
+}
+const expenseConverter = {
+    fromFirestore: (snapshot: any): ExpenseRecord => {
+        const data = snapshot.data();
+        return { id: snapshot.id, ...data, date: (data.date as Timestamp).toDate() } as ExpenseRecord;
+    },
+    toFirestore: (record: ExpenseRecord) => record,
+}
+
 
 export default function AdminDashboardPage() {
-  const [analysisResult, setAnalysisResult] = useState<IntegrityCheckResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<FinancialTrendsOutput | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
-  // Data hooks
-  const [incomeRecords, loadingIncome, errorIncome] = useCollectionData(collection(db, 'income_records'));
-  const [expenseRecords, loadingExpenses, errorExpenses] = useCollectionData(collection(db, 'expense_records'));
-  const [incomeSources, loadingIncomeSources, errorIncomeSources] = useCollectionData(collection(db, 'income_sources'));
-  const [expenseSources, loadingExpenseSources, errorExpenseSources] = useCollectionData(collection(db, 'expense_sources'));
-  const [accounts, loadingAccounts, errorAccounts] = useCollectionData(collection(db, 'accounts'));
-  const [users, loadingUsers, errorUsers] = useCollectionData(collection(db, 'users'));
-  
-  const isLoadingData = loadingIncome || loadingExpenses || loadingIncomeSources || loadingExpenseSources || loadingAccounts || loadingUsers;
-  const dataError = errorIncome || errorExpenses || errorIncomeSources || errorExpenseSources || errorAccounts || errorUsers;
+  // Data hooks for the last 12 months
+  const oneYearAgo = sub(new Date(), { years: 1 });
+  const incomeQuery = useMemo(() => query(collection(db, 'income_records'), where('date', '>=', oneYearAgo)).withConverter(incomeConverter), []);
+  const expenseQuery = useMemo(() => query(collection(db, 'expense_records'), where('date', '>=', oneYearAgo)).withConverter(expenseConverter), []);
 
-  const handleRunAudit = () => {
+  const [incomeRecords, loadingIncome, errorIncome] = useCollectionData(incomeQuery);
+  const [expenseRecords, loadingExpenses, errorExpenses] = useCollectionData(expenseQuery);
+  
+  const isLoadingData = loadingIncome || loadingExpenses;
+  const dataError = errorIncome || errorExpenses;
+
+  const handleRunAnalysis = async () => {
     setIsAnalyzing(true);
     setAnalysisError(null);
     setAnalysisResult(null);
 
     if (dataError) {
-        setAnalysisError(dataError.message);
+        setAnalysisError(`Failed to load data: ${dataError.message}`);
         setIsAnalyzing(false);
         return;
     }
     
-    if (isLoadingData) {
-        setAnalysisError("Data is still loading. Please wait a moment and try again.");
+    if (!incomeRecords || !expenseRecords) {
+        setAnalysisError("Financial records are not loaded yet. Please wait a moment and try again.");
         setIsAnalyzing(false);
         return;
     }
-
+    
     try {
-        const accountIds = new Set(accounts?.map(a => a.id));
-        const incomeSourceIds = new Set(incomeSources?.map(s => s.id));
-        const expenseSourceIds = new Set(expenseSources?.map(s => s.id));
-
-        const orphanedIncomeRecords = (incomeRecords as IncomeRecord[] || []).filter(r => 
-            (r.accountId && !accountIds.has(r.accountId)) || 
-            (r.incomeSourceId && !incomeSourceIds.has(r.incomeSourceId))
-        );
-        
-        const orphanedExpenseRecords = (expenseRecords as ExpenseRecord[] || []).filter(r => 
-            (r.accountId && !accountIds.has(r.accountId)) ||
-            (r.expenseSourceId && !expenseSourceIds.has(r.expenseSourceId))
-        );
-
-        const uncategorizedIncome = (incomeRecords as IncomeRecord[] || []).filter(r => !r.category);
-        const uncategorizedExpenses = (expenseRecords as ExpenseRecord[] || []).filter(r => !r.category);
-
-        const userCount = users?.length || 0;
-
-        setAnalysisResult({
-            orphanedIncomeRecords,
-            orphanedExpenseRecords,
-            uncategorizedIncome,
-            uncategorizedExpenses,
-            userCount
+        const result = await identifyFinancialTrends({
+            incomeRecords: incomeRecords,
+            expenseRecords: expenseRecords,
         });
-
+        setAnalysisResult(result);
     } catch (error: any) {
-        console.error("Data Integrity Audit Error:", error);
-        setAnalysisError(error.message || "An unknown error occurred during the audit.");
+        console.error("AI Analysis Error:", error);
+        setAnalysisError(error.message || "An unknown error occurred during analysis. Check the console for details.");
     } finally {
         setIsAnalyzing(false);
     }
   };
-  
-  const getIssueCount = (result: IntegrityCheckResult) => {
-      return result.orphanedIncomeRecords.length + result.orphanedExpenseRecords.length + result.uncategorizedIncome.length + result.uncategorizedExpenses.length;
-  }
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -107,7 +90,7 @@ export default function AdminDashboardPage() {
         <CardContent>
           <p>
             You have successfully accessed the admin area. From here, you can manage users and
-            oversee system-wide settings and data integrity.
+            oversee system-wide settings and financial analysis.
           </p>
         </CardContent>
       </Card>
@@ -117,73 +100,51 @@ export default function AdminDashboardPage() {
           <div className="flex items-center gap-3">
             <BrainCircuit className="h-8 w-8 text-primary" />
             <div>
-              <CardTitle>Data Integrity &amp; System Audit</CardTitle>
-              <CardDescription>Run a scan to find potential issues in your financial data.</CardDescription>
+              <CardTitle>AI-Powered Financial Analysis</CardTitle>
+              <CardDescription>Generate insights and recommendations based on the last 12 months of financial data.</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <Button onClick={handleRunAudit} disabled={isAnalyzing || isLoadingData}>
-            {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-            {isAnalyzing ? 'Running Audit...' : 'Run Data Audit'}
+          <Button onClick={handleRunAnalysis} disabled={isAnalyzing || isLoadingData}>
+            {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            {isAnalyzing ? 'Analyzing...' : isLoadingData ? 'Loading Data...' : 'Analyze Financial Health'}
           </Button>
 
           {analysisError && (
             <Alert variant="destructive" className="mt-4">
               <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Audit Failed</AlertTitle>
+              <AlertTitle>Analysis Failed</AlertTitle>
               <AlertDescription>{analysisError}</AlertDescription>
             </Alert>
           )}
-
+          
           {analysisResult && (
             <div className="mt-6 space-y-6 animate-in fade-in-50">
-                {getIssueCount(analysisResult) === 0 ? (
-                     <Alert variant="default" className="border-green-500 text-green-700">
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        <AlertTitle>No Issues Found</AlertTitle>
-                        <AlertDescription>The data integrity audit completed successfully. Everything looks clean!</AlertDescription>
-                    </Alert>
-                ) : (
-                    <Alert variant="destructive">
-                        <AlertTriangle className="h-4 w-4" />
-                        <AlertTitle>{getIssueCount(analysisResult)} Potential Issues Found</AlertTitle>
-                        <AlertDescription>Review the details below. These issues may affect reporting accuracy.</AlertDescription>
-                    </Alert>
-                )}
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-                    <Users className="h-6 w-6 text-accent" />
-                    <CardTitle>User Overview</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-2xl font-bold">{analysisResult.userCount}</p>
-                        <p className="text-sm text-muted-foreground">Total registered users</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-                    <Link2Off className="h-6 w-6 text-destructive" />
-                    <CardTitle>Orphaned Records</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-2xl font-bold">{analysisResult.orphanedIncomeRecords.length + analysisResult.orphanedExpenseRecords.length}</p>
-                        <p className="text-sm text-muted-foreground">Transactions linked to deleted accounts or sources.</p>
-                    </CardContent>
-                </Card>
-                 <Card>
-                    <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-                    <HelpCircle className="h-6 w-6 text-amber-600" />
-                    <CardTitle>Uncategorized Items</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-2xl font-bold">{analysisResult.uncategorizedIncome.length + analysisResult.uncategorizedExpenses.length}</p>
-                         <p className="text-sm text-muted-foreground">Transactions missing a category.</p>
-                    </CardContent>
-                </Card>
-              </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg"><Wand2 className="h-5 w-5 text-accent"/> Key Trends</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="whitespace-pre-wrap text-sm">{analysisResult.trends}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg"><Sparkles className="h-5 w-5 text-accent"/> Actionable Insights</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="whitespace-pre-wrap text-sm">{analysisResult.insights}</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg"><ShieldCheck className="h-5 w-5 text-accent"/> Strategic Recommendations</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="whitespace-pre-wrap text-sm">{analysisResult.recommendations}</p>
+                </CardContent>
+              </Card>
             </div>
           )}
         </CardContent>
