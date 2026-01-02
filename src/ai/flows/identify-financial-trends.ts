@@ -46,10 +46,10 @@ const prompt = ai.definePrompt({
   3.  **Strategic Recommendations**: Suggest concrete actions for better financial control (e.g., "Consider creating a dedicated budget for 'Outreach Events' to track ROI," "Recommend negotiating a new electricity tariff or installing energy-saving light bulbs"). Use bullet points.
   
   Income Records:
-  {{{jsonStringify incomeRecords}}}
+  {{{incomeRecords}}}
   
   Expense Records:
-  {{{jsonStringify expenseRecords}}}
+  {{{expenseRecords}}}
   `,
 });
 
