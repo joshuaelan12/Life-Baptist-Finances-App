@@ -8,9 +8,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ShieldCheck, BrainCircuit, Loader2, AlertTriangle, Sparkles, Wand2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
-import { collection, query, where, Timestamp, startOfYear, endOfYear, sub } from 'firebase/firestore';
+import { collection, query, where, Timestamp } from 'firebase/firestore';
+import { sub } from 'date-fns';
 import { identifyFinancialTrends } from '@/ai/flows/identify-financial-trends';
-import type { IncomeRecord, ExpenseRecord, FinancialTrendsOutput } from '@/types';
+import type { IncomeRecord, ExpenseRecord } from '@/types';
+import type { IdentifyFinancialTrendsOutput } from '@/ai/flows/identify-financial-trends';
 
 const incomeConverter = {
     fromFirestore: (snapshot: any): IncomeRecord => {
@@ -29,7 +31,7 @@ const expenseConverter = {
 
 
 export default function AdminDashboardPage() {
-  const [analysisResult, setAnalysisResult] = useState<FinancialTrendsOutput | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<IdentifyFinancialTrendsOutput | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
