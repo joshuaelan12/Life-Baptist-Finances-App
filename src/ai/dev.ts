@@ -1,4 +1,6 @@
-import { config } from 'dotenv';
+// This file is machine-generated - DO NOT EDIT!
+
+import {config} from 'dotenv';
 config();
 
 import '@/ai/flows/identify-financial-trends.ts';
