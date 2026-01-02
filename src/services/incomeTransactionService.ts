@@ -35,7 +35,7 @@ export const addIncomeTransaction = async (
       createdAt: serverTimestamp(),
     });
 
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "CREATE_INCOME_TRANSACTION", {
       recordId: docRef.id,
@@ -67,7 +67,7 @@ export const updateIncomeTransaction = async (
     }
     await updateDoc(recordRef, updatePayload as DocumentData);
     
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "UPDATE_INCOME_TRANSACTION", {
       recordId: recordId,

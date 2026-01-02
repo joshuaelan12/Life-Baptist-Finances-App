@@ -71,7 +71,7 @@ export const addTitheTransaction = async (
       createdAt: serverTimestamp(),
     });
     
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "CREATE_INCOME_RECORD", {
       recordId: docRef.id,
@@ -103,7 +103,7 @@ export const updateIncomeSource = async (
 
     await updateDoc(recordRef, updatePayload as DocumentData);
     
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     let details = `Updated income source: "${dataToUpdate.transactionName || sourceId}".`;
     if (dataToUpdate.budgets) {

@@ -104,14 +104,14 @@ export const setBudgetForYear = async (
     throw new Error('User ID is required to set a budget.');
   }
   try {
-    const accountRef = doc(db, ACCOUNTS_COLLECTION, accountId);
+    const accountRef = doc(db, ACCOUNTS_COLlection, accountId);
     // Use dot notation to update a specific field in a map
     const budgetField = `budgets.${year}`;
     await updateDoc(accountRef, {
       [budgetField]: budget
     });
 
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "SET_BUDGET", {
         recordId: accountId,
@@ -123,5 +123,3 @@ export const setBudgetForYear = async (
     throw new Error(`Failed to set budget for ${year}.`);
   }
 };
-
-    

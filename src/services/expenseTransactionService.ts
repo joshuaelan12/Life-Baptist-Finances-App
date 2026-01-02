@@ -37,7 +37,7 @@ export const addExpenseTransaction = async (
       createdAt: serverTimestamp(),
     });
 
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "CREATE_EXPENSE_TRANSACTION", {
       recordId: docRef.id,
@@ -69,7 +69,7 @@ export const updateExpenseTransaction = async (
     }
     await updateDoc(recordRef, updatePayload as DocumentData);
 
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     await logActivity(userId, userEmail, "UPDATE_EXPENSE_TRANSACTION", {
       recordId: recordId,
@@ -104,5 +104,3 @@ export const deleteExpenseTransaction = async (
     throw new Error("Failed to delete expense transaction.");
   }
 };
-
-    

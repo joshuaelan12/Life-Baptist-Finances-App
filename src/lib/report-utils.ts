@@ -39,7 +39,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
         if (relevantAccounts.length > 0) {
             csvData.push([type.toUpperCase()]); // Main Type Header
             relevantAccounts.forEach((account: Account) => {
-                const accountBudget = account.budgets?.[budgetYear || ''] || 0;
+                const accountBudget = account.budgets?.[budgetYear || new Date().getFullYear()] || 0;
                 
                 const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                 const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
@@ -67,7 +67,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
                 const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
-                    const sourceBudget = source.budgets?.[budgetYear || ''] || (source.budget || 0); // fallback for old data
+                    const sourceBudget = source.budgets?.[budgetYear || new Date().getFullYear()] || (source.budget || 0); // fallback for old data
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
                     const sourceRealized = records.reduce((sum, r) => sum + r.amount, 0);
                     const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
@@ -102,7 +102,7 @@ export const downloadCsv = (data: any[], reportTitle: string, reportType: string
         ws = utils.aoa_to_sheet(hierarchicalData, { skipHeader: true }); // We created custom headers
     } else {
         const { headers, body } = getHeadersAndRows(data, reportType, options);
-        const csvData = [headers[0]].concat(body);
+        const csvData = [headers[0]].concat(body.map(row => row.map(cell => typeof cell === 'object' ? cell.content : cell)));
         ws = utils.aoa_to_sheet(csvData);
     }
     
@@ -210,7 +210,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                      body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED' } }]);
                      
                      grouped[type].forEach((account: Account) => {
-                         const accountBudget = account.budgets?.[options.budgetYear || ''] || 0;
+                         const accountBudget = account.budgets?.[options.budgetYear || new Date().getFullYear()] || 0;
                          const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                          const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
                          
@@ -238,7 +238,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
 
                          sources.forEach(source => {
-                             const sourceBudget = source.budgets?.[options.budgetYear || ''] || (source.budget || 0); // Fallback for old budget field
+                             const sourceBudget = source.budgets?.[options.budgetYear || new Date().getFullYear()] || (source.budget || 0); // Fallback for old budget field
                              const records = type === 'Income' 
                                  ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) 
                                  : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
@@ -374,5 +374,3 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
     addFooter();
     doc.save(fileName);
 };
-
-    

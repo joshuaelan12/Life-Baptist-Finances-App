@@ -87,5 +87,3 @@ export const deleteMember = async (
     throw new Error("Failed to delete the member.");
   }
 };
-
-    

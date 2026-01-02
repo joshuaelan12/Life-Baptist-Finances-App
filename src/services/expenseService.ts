@@ -66,7 +66,7 @@ export const updateExpenseSource = async (
 
     await updateDoc(recordRef, updatePayload as DocumentData);
 
-    const currencyFormatter = new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
 
     let details = `Updated expense source: "${dataToUpdate.expenseName || sourceId}".`;
     if (dataToUpdate.budgets) {
@@ -119,4 +119,3 @@ export const deleteExpenseSource = async (
     throw new Error("Failed to delete expense source. It may be in use in other records.");
   }
 };
-
