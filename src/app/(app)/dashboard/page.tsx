@@ -4,7 +4,7 @@
 import React, { useMemo, useState } from 'react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { DollarSign, Users, HandCoins, Landmark, LineChart, TrendingUp, TrendingDown, Loader2, AlertTriangle, ReceiptText, Scale, Milestone } from 'lucide-react';
+import { DollarSign, Users, HandCoins, Landmark, LineChart, TrendingUp, TrendingDown, Loader2, AlertTriangle, ReceiptText, Scale, Milestone, Wallet } from 'lucide-react';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer, LabelList } from 'recharts';
 import type { ChartConfig } from '@/components/ui/chart';
@@ -13,7 +13,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, type DocumentData, type QueryDocumentSnapshot, type SnapshotOptions } from 'firebase/firestore';
 import type { IncomeRecord, ExpenseRecord, IncomeRecordFirestore, ExpenseRecordFirestore } from '@/types';
-import { format, subMonths, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
+import { format, subMonths, startOfYear, endOfYear } from 'date-fns';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -120,11 +120,12 @@ export default function DashboardPage() {
     
     const netBalance = totalIncome - totalExpenses;
     const balanceBroughtForward = prevYearTotalIncome - prevYearTotalExpenses;
+    const generalAvailableBalance = netBalance + balanceBroughtForward;
 
-    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward };
+    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward, generalAvailableBalance };
   }, [incomeRecords, expenseRecords, selectedYear]);
 
-  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward } = financialSummary;
+  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward, generalAvailableBalance } = financialSummary;
   
   const incomeChangePercentage = totalIncome && prevYearTotalIncome
     ? ((totalIncome - prevYearTotalIncome) / prevYearTotalIncome) * 100
@@ -275,11 +276,11 @@ export default function DashboardPage() {
           description={`All recorded expenses for ${selectedYear}`}
         />
         <StatCard
-          title="Net Balance"
-          value={formatCurrency(netBalance)}
-          icon={Scale}
-          description="Income minus Expenses"
-          iconClassName={netBalance >= 0 ? 'text-emerald-500' : 'text-red-500'}
+          title="General Available Balance"
+          value={formatCurrency(generalAvailableBalance)}
+          icon={Wallet}
+          description="Net Balance + Balance B/F"
+          iconClassName={generalAvailableBalance >= 0 ? 'text-emerald-500' : 'text-red-500'}
         />
       </div>
       <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-3">
