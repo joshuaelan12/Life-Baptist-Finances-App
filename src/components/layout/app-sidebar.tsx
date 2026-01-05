@@ -25,6 +25,7 @@ import {
   ReceiptText,
   History,
   BookUser,
+  Milestone,
 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -147,5 +148,3 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
-
-    

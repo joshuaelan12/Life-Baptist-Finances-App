@@ -4,7 +4,7 @@
 import React, { useMemo, useState } from 'react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { DollarSign, Users, HandCoins, Landmark, LineChart, TrendingUp, TrendingDown, Loader2, AlertTriangle, ReceiptText, Scale } from 'lucide-react';
+import { DollarSign, Users, HandCoins, Landmark, LineChart, TrendingUp, TrendingDown, Loader2, AlertTriangle, ReceiptText, Scale, Milestone } from 'lucide-react';
 import { ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, ResponsiveContainer, LabelList } from 'recharts';
 import type { ChartConfig } from '@/components/ui/chart';
@@ -94,6 +94,7 @@ export default function DashboardPage() {
     let totalIncome = 0;
     let totalExpenses = 0;
     let prevYearTotalIncome = 0;
+    let prevYearTotalExpenses = 0;
 
     incomeRecords?.forEach(record => {
       if (record.date >= yearStart && record.date <= yearEnd) {
@@ -112,14 +113,18 @@ export default function DashboardPage() {
        if (record.date >= yearStart && record.date <= yearEnd) {
         totalExpenses += record.amount;
       }
+      if (record.date >= prevYearStart && record.date <= prevYearEnd) {
+        prevYearTotalExpenses += record.amount;
+      }
     });
     
     const netBalance = totalIncome - totalExpenses;
+    const balanceBroughtForward = prevYearTotalIncome - prevYearTotalExpenses;
 
-    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome };
+    return { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward };
   }, [incomeRecords, expenseRecords, selectedYear]);
 
-  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome } = financialSummary;
+  const { totalOfferings, totalTithes, otherIncome, totalIncome, totalExpenses, netBalance, prevYearTotalIncome, balanceBroughtForward } = financialSummary;
   
   const incomeChangePercentage = totalIncome && prevYearTotalIncome
     ? ((totalIncome - prevYearTotalIncome) / prevYearTotalIncome) * 100
@@ -241,7 +246,14 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          title="Balance B/F"
+          value={formatCurrency(balanceBroughtForward)}
+          icon={Milestone}
+          description={`From year ${selectedYear - 1}`}
+          iconClassName={balanceBroughtForward >= 0 ? 'text-blue-500' : 'text-orange-500'}
+        />
         <StatCard
           title="Total Income"
           value={formatCurrency(totalIncome)}
@@ -269,6 +281,8 @@ export default function DashboardPage() {
           description="Income minus Expenses"
           iconClassName={netBalance >= 0 ? 'text-emerald-500' : 'text-red-500'}
         />
+      </div>
+      <div className="grid gap-4 md:grid-cols-1 lg:grid-cols-3">
         <StatCard
           title="Total Offerings"
           value={formatCurrency(totalOfferings)}
