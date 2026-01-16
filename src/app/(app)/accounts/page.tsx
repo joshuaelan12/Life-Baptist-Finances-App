@@ -214,7 +214,7 @@ export default function AccountsPage() {
 
     return (
         <div className="space-y-6 md:space-y-8">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
                 <BookUser className="mr-3 h-8 w-8 text-primary" />
                 Chart of Accounts
             </h1>
@@ -246,7 +246,7 @@ export default function AccountsPage() {
                                     <FormItem><FormLabel>Initial Budget (XAF)</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
                                 )} />
                             </div>
-                            <Button type="submit" disabled={isSubmitting}>
+                            <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
                                 {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                                 Add Account
                             </Button>
@@ -257,9 +257,12 @@ export default function AccountsPage() {
 
             <Card className="shadow-lg">
                 <CardHeader>
-                    <div className="flex justify-between items-center">
-                        <CardTitle>Manage Accounts</CardTitle>
-                        <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <div>
+                            <CardTitle>Manage Accounts</CardTitle>
+                            <CardDescription>View, edit, and manage budgets for existing accounts.</CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2 self-start sm:self-center">
                              <Label htmlFor="year-select">Year:</Label>
                              <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
                                 <SelectTrigger className="w-[120px]" id="year-select">
@@ -271,7 +274,6 @@ export default function AccountsPage() {
                              </Select>
                         </div>
                     </div>
-                     <CardDescription>View, edit, and manage budgets for existing accounts.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {errorAccounts && <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{errorAccounts.message}</AlertDescription></Alert>}

@@ -42,7 +42,7 @@ export default function ManageUsersPage() {
     <div className="space-y-6 md:space-y-8">
       <div className="flex items-center gap-3">
         <Users className="h-8 w-8 text-primary" />
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Manage Users</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Manage Users</h1>
       </div>
       
       <Card className="shadow-lg">

@@ -90,7 +90,7 @@ export default function ActivityLogPage() {
     <div className="space-y-6 md:space-y-8">
       <div className="flex items-center gap-3">
         <History className="h-8 w-8 text-primary" />
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">User Activity Log</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">User Activity Log</h1>
       </div>
       
       <Card className="shadow-lg">
@@ -136,7 +136,7 @@ export default function ActivityLogPage() {
                           {log.action.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase())}
                         </span>
                       </TableCell>
-                      <TableCell className="max-w-[300px] truncate" title={log.details}>{log.details || 'N/A'}</TableCell>
+                      <TableCell className="max-w-xs truncate" title={log.details}>{log.details || 'N/A'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

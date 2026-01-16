@@ -152,22 +152,22 @@ export default function MembersPage() {
 
     return (
         <div className="space-y-6 md:space-y-8">
-             <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
                 <Users className="mr-3 h-8 w-8 text-primary" />
                 Manage Members
             </h1>
 
             <Card className="shadow-lg">
-                <CardHeader>
-                    <div className="flex justify-between items-center">
+                <CardHeader className="space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <div>
                             <CardTitle>Church Members</CardTitle>
                             <CardDescription>Add, edit, or remove church members and view their tithe history.</CardDescription>
                         </div>
-                        <Button onClick={() => openMemberDialog(null)}><UserPlus className="mr-2 h-4 w-4" /> Add Member</Button>
+                        <Button onClick={() => openMemberDialog(null)} className="w-full sm:w-auto"><UserPlus className="mr-2 h-4 w-4" /> Add Member</Button>
                     </div>
-                     <div className="relative pt-4">
-                        <Search className="absolute left-2.5 top-6 h-4 w-4 text-muted-foreground" />
+                     <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                         <Input
                             type="search"
                             placeholder="Search by name..."

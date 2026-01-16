@@ -230,7 +230,7 @@ export default function IncomePage() {
 
   return (
     <div className="space-y-6 md:space-y-8">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
         <DollarSign className="mr-3 h-8 w-8 text-primary" />
         Record Income
       </h1>
@@ -307,7 +307,7 @@ export default function IncomePage() {
                     )}/>
                 </div>
 
-                <Button type="submit" className="w-full md:w-auto" disabled={isSubmitting || !authUser || !selectedCategory}>
+                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting || !authUser || !selectedCategory}>
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                    {selectedCategory === 'Tithe' ? 'Save Tithe' : 'Create Income Source'}
                 </Button>
@@ -319,12 +319,12 @@ export default function IncomePage() {
       
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>Budgeted Income Sources</CardTitle>
               <CardDescription>Manage recurring income sources and their yearly budgets.</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 self-start sm:self-center">
                  <Label htmlFor="year-select">Year:</Label>
                  <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
                     <SelectTrigger className="w-[120px]" id="year-select">

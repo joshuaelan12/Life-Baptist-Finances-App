@@ -232,7 +232,7 @@ export default function ExpensesPage() {
 
   return (
     <div className="space-y-6 md:space-y-8">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
         <ReceiptText className="mr-3 h-8 w-8 text-primary" />
         Record Expenses
       </h1>
@@ -287,7 +287,7 @@ export default function ExpensesPage() {
                       <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea placeholder="E.g., Yearly budget for all office supplies." {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
                   )}/>
                 </div>
-                <Button type="submit" className="w-full md:w-auto" disabled={isSubmitting || !authUser}>
+                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting || !authUser}>
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                    Create Expense Source
                 </Button>
@@ -299,12 +299,12 @@ export default function ExpensesPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>Budgeted Expense Items</CardTitle>
               <CardDescription>Click an item to view transactions. Set budgets per year.</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 self-start sm:self-center">
                 <Label htmlFor="year-select">Year:</Label>
                 <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
                     <SelectTrigger className="w-[120px]" id="year-select"><SelectValue /></SelectTrigger>

@@ -256,7 +256,7 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6 md:space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
           <FileText className="mr-3 h-8 w-8 text-primary" />
           Financial Reports
         </h1>
@@ -307,7 +307,7 @@ export default function ReportsPage() {
                 <Label>3. Select Month</Label>
                  <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full sm:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
+                      <Button variant="outline" className="w-full md:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {format(selectedMonth, "MMMM yyyy")}
                       </Button>
@@ -334,7 +334,7 @@ export default function ReportsPage() {
                       <Button
                           id="date"
                           variant={"outline"}
-                          className={("w-full sm:w-[300px] justify-start text-left font-normal")}
+                          className={("w-full md:w-[300px] justify-start text-left font-normal")}
                           disabled={isGenerating}
                       >
                           <CalendarIcon className="mr-2 h-4 w-4" />
@@ -373,7 +373,7 @@ export default function ReportsPage() {
                <div className="space-y-2">
                  <Label>Select Budget Year</Label>
                  <Select value={String(budgetYear)} onValueChange={(v) => setBudgetYear(Number(v))} disabled={isGenerating}>
-                    <SelectTrigger className="w-full sm:w-[280px]">
+                    <SelectTrigger className="w-full md:w-[280px]">
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

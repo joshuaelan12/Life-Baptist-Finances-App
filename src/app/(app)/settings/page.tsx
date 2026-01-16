@@ -132,7 +132,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-8 max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold tracking-tight text-foreground">Settings</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Settings</h1>
 
       <Card className="shadow-lg">
         <CardHeader>

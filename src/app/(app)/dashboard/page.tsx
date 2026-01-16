@@ -237,7 +237,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6 md:space-y-8">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Dashboard</h1>
         <div className="flex items-center gap-2">
             <Label htmlFor="year-select">Year:</Label>
             <Select value={String(selectedYear)} onValueChange={(val) => setSelectedYear(Number(val))}>
@@ -304,8 +304,8 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="shadow-lg">
+      <div className="grid gap-6 lg:grid-cols-5">
+        <Card className="shadow-lg lg:col-span-3">
           <CardHeader>
             <CardTitle>Income vs Expenses ({selectedYear})</CardTitle>
             <CardDescription>Monthly breakdown for the selected year.</CardDescription>
@@ -315,8 +315,8 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyChartData} margin={{ top: 20, right: 0, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} tickLine={false} axisLine={false} tickMargin={8} width={80} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                  <YAxis tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} tickLine={false} axisLine={false} tickMargin={8} width={80} fontSize={12} />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="dot" formatter={(value, name, props) => {
                      return (
                         <div className="flex flex-col">
@@ -334,7 +334,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg">
+        <Card className="shadow-lg lg:col-span-2">
           <CardHeader>
             <CardTitle>Income Breakdown ({selectedYear})</CardTitle>
             <CardDescription>Distribution of income sources for the selected year.</CardDescription>
@@ -344,8 +344,8 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={incomeBreakdownData} layout="vertical" margin={{ top: 20, right: 50, left: 20, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} />
-                  <YAxis dataKey="name" type="category" width={80} tickLine={false} axisLine={false} />
+                  <XAxis type="number" tickFormatter={(value) => `${(value / 1000).toLocaleString('fr-CM', { maximumFractionDigits: 0 })}k`} fontSize={12} />
+                  <YAxis dataKey="name" type="category" width={80} tickLine={false} axisLine={false} fontSize={12} />
                   <ChartTooltip cursor={false} content={<ChartTooltipContent formatter={(value, name) => {
                      return (
                         <div className="flex flex-col">

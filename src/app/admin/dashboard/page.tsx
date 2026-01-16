@@ -97,7 +97,7 @@ export default function AdminDashboardPage() {
     <div className="space-y-6 md:space-y-8">
       <div className="flex items-center gap-3">
         <ShieldCheck className="h-8 w-8 text-primary" />
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">Admin Dashboard</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">Admin Dashboard</h1>
       </div>
       
       <Card className="shadow-lg">
@@ -124,7 +124,7 @@ export default function AdminDashboardPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Button onClick={handleRunAnalysis} disabled={isAnalyzing || isLoadingData}>
+          <Button onClick={handleRunAnalysis} disabled={isAnalyzing || isLoadingData} className="w-full sm:w-auto">
             {isAnalyzing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
             {isAnalyzing ? 'Analyzing...' : isLoadingData ? 'Loading Data...' : 'Analyze Financial Health'}
           </Button>
