@@ -12,9 +12,9 @@ interface jsPDFWithAutoTable extends jsPDF {
 }
 
 const formatCurrency = (val: number | null | undefined) => {
-    if (typeof val !== 'number') return 'N/A';
-    // Use en-US locale to get comma separators, but keep XAF currency
-    return val.toLocaleString('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0, maximumFractionDigits: 0 }).replace('XAF', '') + ' XAF';
+    if (typeof val !== 'number') return '0 XAF';
+    // Use en-US locale for consistent comma separators, and append XAF
+    return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' XAF';
 };
 
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
@@ -24,7 +24,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
     const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
     const accounts = data as Account[];
-    const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear, startDate, endDate } = options;
+    const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate } = options;
 
     const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
         if (!startDate || !endDate) return records;
@@ -34,12 +34,19 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
     const filteredIncomeRecords = filterByDate(incomeRecords);
     const filteredExpenseRecords = filterByDate(expenseRecords);
 
+    let grandBudgetTotal = 0;
+    let grandRealizedTotal = 0;
+
     typeOrder.forEach(type => {
         const relevantAccounts = accounts.filter(acc => acc.type === type);
         if (relevantAccounts.length > 0) {
             csvData.push([type.toUpperCase()]); // Main Type Header
+            
+            let typeBudgetTotal = 0;
+            let typeRealizedTotal = 0;
+
             relevantAccounts.forEach((account: Account) => {
-                const accountBudget = account.budgets?.[budgetYear || new Date().getFullYear()] || 0;
+                const accountBudget = account.budgets?.[budgetYear] || 0;
                 
                 const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                 const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
@@ -55,6 +62,9 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                 const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
                 const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                 
+                typeBudgetTotal += accountBudget;
+                typeRealizedTotal += accountRealized;
+
                 csvData.push([
                     'Account',
                     account.code,
@@ -67,13 +77,13 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
                 const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
-                    const sourceBudget = source.budgets?.[budgetYear || new Date().getFullYear()] || (source.budget || 0); // fallback for old data
+                    const sourceBudget = source.budgets?.[budgetYear] || (source.budget || 0);
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
                     const sourceRealized = records.reduce((sum, r) => sum + r.amount, 0);
                     const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
 
                     csvData.push([
-                        '  Sub-Account', // Indented for hierarchy
+                        '  Sub-Account',
                         source.code,
                         'transactionName' in source ? source.transactionName : source.expenseName,
                         source.category,
@@ -83,23 +93,44 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                     ]);
                 });
             });
+
+            // Section Totals for CSV
+            csvData.push([
+                `TOTAL ${type.toUpperCase()}`,
+                '',
+                '',
+                '',
+                typeBudgetTotal,
+                typeRealizedTotal,
+                `${typeBudgetTotal > 0 ? ((typeRealizedTotal / typeBudgetTotal) * 100).toFixed(1) : '0.0'}%`
+            ]);
+            csvData.push([]); // Empty row for spacing
+
+            if (type === 'Income') {
+                grandBudgetTotal += typeBudgetTotal;
+                grandRealizedTotal += typeRealizedTotal;
+            } else if (type === 'Expense') {
+                grandBudgetTotal -= typeBudgetTotal;
+                grandRealizedTotal -= typeRealizedTotal;
+            }
         }
     });
+
+    // Grand Summary for CSV
+    csvData.push(['GRAND SUMMARY']);
+    csvData.push(['Net Position', '', '', '', grandBudgetTotal, grandRealizedTotal, '']);
 
     return csvData;
 };
 
 
 export const downloadCsv = (data: any[], reportTitle: string, reportType: string, options: ReportOptions) => {
-    if (data.length === 0) {
-        alert("No data to download.");
-        return;
-    }
+    if (data.length === 0) return;
     
     let ws;
     if (reportType === 'budget_vs_actuals' || reportType === 'balance_sheet') {
         const hierarchicalData = generateHierarchicalDataForCsv(data, options);
-        ws = utils.aoa_to_sheet(hierarchicalData, { skipHeader: true }); // We created custom headers
+        ws = utils.aoa_to_sheet(hierarchicalData);
     } else {
         const { headers, body } = getHeadersAndRows(data, reportType, options);
         const csvData = [headers[0]].concat(body.map(row => row.map(cell => typeof cell === 'object' ? cell.content : cell)));
@@ -107,8 +138,7 @@ export const downloadCsv = (data: any[], reportTitle: string, reportType: string
     }
     
     const wb = utils.book_new();
-    utils.book_append_sheet(wb, ws, "Report");
-    
+    utils.book_append_sheet(wb, ws, "Financial Report");
     const fileName = `${reportTitle.replace(/[\s/]/g, '_')}.xlsx`;
     writeFile(wb, fileName);
 };
@@ -146,6 +176,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                 item.memberName || 'N/A', 
                 item.description || 'N/A',
             ]);
+            total = data.reduce((sum, r) => sum + r.amount, 0);
             break;
         case 'expenses':
             headers.push(['Code', 'Date', 'Category', 'Account', 'Amount', 'Payee', 'Payment Method', 'Description']);
@@ -159,35 +190,22 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                 item.paymentMethod || 'N/A',
                 item.description || 'N/A',
             ]);
-            break;
-        case 'tithes':
-            headers.push(['Date', 'Member Name', 'Amount']);
-            body = data.map(item => [
-                item.date ? format(item.date, 'PP') : 'N/A',
-                item.memberName || 'N/A',
-                formatCurrency(item.amount)
-            ]);
+            total = data.reduce((sum, r) => sum + r.amount, 0);
             break;
         case 'summary':
             headers.push(['Category', 'Amount']);
-            body = data.map(item => [
-                item.Category,
-                formatCurrency(item.Amount)
-            ]);
+            body = data.map(item => [item.Category, formatCurrency(item.Amount)]);
             break;
         case 'individual_tithe':
             headers.push(['Date', 'Amount']);
-            body = data.map(item => [
-                item.date ? format(item.date, 'PP') : 'N/A',
-                formatCurrency(item.amount)
-            ]);
+            body = data.map(item => [item.date ? format(item.date, 'PP') : 'N/A', formatCurrency(item.amount)]);
             total = data.reduce((sum, item) => sum + item.amount, 0);
             break;
         case 'budget_vs_actuals':
         case 'balance_sheet':
              const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
              const accounts = data as Account[];
-             const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate } = options;
+             const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear() } = options;
 
              const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
                 if (!startDate || !endDate) return records;
@@ -197,20 +215,21 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
              const filteredIncomeRecords = filterByDate(incomeRecords);
              const filteredExpenseRecords = filterByDate(expenseRecords);
 
-             headers.push(['A/C# / Name', 'Description / Category', `Budget for ${options.budgetYear}`, `Realized: ${options.periodString}`, '% Realized']);
+             headers.push(['A/C# / Name', 'Description / Category', `Budget for ${budgetYear}`, `Realized: ${options.periodString}`, '% Realized']);
 
-             const grouped: Record<string, any[]> = {};
-             accounts.forEach(d => {
-                 if (!grouped[d.type]) grouped[d.type] = [];
-                 grouped[d.type].push(d);
-             });
+             let grandBudgetTotal = 0;
+             let grandRealizedTotal = 0;
 
              typeOrder.forEach(type => {
-                 if (grouped[type]) {
-                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED' } }]);
+                 const groupedAccounts = accounts.filter(acc => acc.type === type);
+                 if (groupedAccounts.length > 0) {
+                     body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'center' } }]);
                      
-                     grouped[type].forEach((account: Account) => {
-                         const accountBudget = account.budgets?.[options.budgetYear || new Date().getFullYear()] || 0;
+                     let typeBudgetTotal = 0;
+                     let typeRealizedTotal = 0;
+
+                     groupedAccounts.forEach((account: Account) => {
+                         const accountBudget = account.budgets?.[budgetYear] || 0;
                          const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                          const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
                          
@@ -227,18 +246,20 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
                          const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                          
+                         typeBudgetTotal += accountBudget;
+                         typeRealizedTotal += accountRealized;
+
                          body.push([
-                             { content: `${account.code} - ${account.name}`, styles: { fontStyle: 'bold', fillColor: '#FAF5F0' } },
-                             { content: account.type, styles: { fillColor: '#FAF5F0' } },
-                             { content: formatCurrency(accountBudget), styles: { halign: 'right', fillColor: '#FAF5F0' } },
-                             { content: formatCurrency(accountRealized), styles: { halign: 'right', fillColor: '#FAF5F0' } },
-                             { content: `${accountPercentage.toFixed(1)}%`, styles: { halign: 'right', fillColor: '#FAF5F0' } }
+                             { content: `${account.code} - ${account.name}`, styles: { fontStyle: 'bold', fillColor: '#F8F9FA' } },
+                             { content: account.type, styles: { fillColor: '#F8F9FA' } },
+                             { content: formatCurrency(accountBudget), styles: { halign: 'right', fillColor: '#F8F9FA' } },
+                             { content: formatCurrency(accountRealized), styles: { halign: 'right', fillColor: '#F8F9FA' } },
+                             { content: `${accountPercentage.toFixed(1)}%`, styles: { halign: 'right', fillColor: '#F8F9FA' } }
                          ]);
 
                          const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
-
                          sources.forEach(source => {
-                             const sourceBudget = source.budgets?.[options.budgetYear || new Date().getFullYear()] || (source.budget || 0); // Fallback for old budget field
+                             const sourceBudget = source.budgets?.[budgetYear] || (source.budget || 0);
                              const records = type === 'Income' 
                                  ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) 
                                  : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
@@ -246,7 +267,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                              const sourcePercentage = sourceBudget > 0 ? (sourceRealized / sourceBudget) * 100 : 0;
 
                              body.push([
-                                 { content: `  ${source.code} - ${'transactionName' in source ? source.transactionName : source.expenseName}`, styles: { cellPadding: { left: 8 } } },
+                                 { content: `  ${source.code} - ${'transactionName' in source ? source.transactionName : source.expenseName}`, styles: { cellPadding: { left: 15 } } },
                                  source.category,
                                  { content: formatCurrency(sourceBudget), styles: { halign: 'right' } },
                                  { content: formatCurrency(sourceRealized), styles: { halign: 'right' } },
@@ -254,20 +275,30 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                              ]);
                          });
                      });
+
+                     // Category Total Row
+                     body.push([
+                         { content: `TOTAL ${type.toUpperCase()}`, colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } },
+                         { content: formatCurrency(typeBudgetTotal), styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } },
+                         { content: formatCurrency(typeRealizedTotal), styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } },
+                         { content: `${typeBudgetTotal > 0 ? ((typeRealizedTotal / typeBudgetTotal) * 100).toFixed(1) : '0.0'}%`, styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } }
+                     ]);
+
+                     if (type === 'Income') { grandBudgetTotal += typeBudgetTotal; grandRealizedTotal += typeRealizedTotal; }
+                     else if (type === 'Expense') { grandBudgetTotal -= typeBudgetTotal; grandRealizedTotal -= typeRealizedTotal; }
                  }
              });
+
+             // Grand Total Row
+             body.push([
+                { content: 'GRAND SUMMARY: NET POSITION', colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
+                { content: formatCurrency(grandBudgetTotal), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
+                { content: formatCurrency(grandRealizedTotal), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
+                { content: '', styles: { fillColor: '#346F4F' } }
+             ]);
              break;
 
-
         default:
-            if (data.length > 0) {
-                const sanitizedData = data.map(d => {
-                    const { id, recordedByUserId, createdAt, ...rest } = d;
-                    return rest;
-                });
-                headers.push(Object.keys(sanitizedData[0]));
-                body = sanitizedData.map(item => headers[0].map(header => item[header]));
-            }
             break;
     }
     return { headers, rows, total, body };
@@ -275,102 +306,58 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
 
 
 export const downloadPdf = (data: any[], reportTitle: string, reportType: string, options: ReportOptions = {}) => {
-    if (data.length === 0) {
-        alert("No data available to generate PDF.");
-        return;
-    }
+    if (data.length === 0) return;
 
     const doc = new jsPDF('p', 'pt', 'a4') as jsPDFWithAutoTable;
     const { headers, body, total } = getHeadersAndRows(data, reportType, options);
-    const fileName = `${reportTitle.replace(/[\s/]/g, '_')}.pdf`;
     const pageWidth = doc.internal.pageSize.getWidth();
 
-    // Add Header
     const addHeader = (pageNumber: number) => {
-        if (pageNumber > 1) return;
         doc.setFontSize(20);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor('#2A4035'); // --foreground color
+        doc.setTextColor('#2A4035');
         doc.text("Life Baptist Church Mutengene", pageWidth / 2, 40, { align: 'center' });
         
         doc.setFontSize(12);
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor('#857B70'); // --muted-foreground
-        const subTitle = reportType === 'budget_vs_actuals'
-            ? `Budget vs. Actuals Report ${options.periodString || ''}`
-            : reportTitle;
-        doc.text(subTitle, pageWidth / 2, 60, { align: 'center' });
+        doc.setTextColor('#857B70');
+        doc.text(reportTitle, pageWidth / 2, 60, { align: 'center' });
     };
 
-    // Add Footer
     const addFooter = () => {
         const pageCount = (doc.internal as any).getNumberOfPages();
         for (let i = 1; i <= pageCount; i++) {
             doc.setPage(i);
             doc.setFontSize(8);
             doc.setTextColor('#857B70');
-            const footerText = `Page ${i} of ${pageCount} | Generated on: ${format(new Date(), 'PPpp')}`;
-            doc.text(footerText, pageWidth / 2, doc.internal.pageSize.getHeight() - 20, { align: 'center' });
+            doc.text(`Page ${i} of ${pageCount} | Generated: ${format(new Date(), 'PPpp')}`, pageWidth / 2, doc.internal.pageSize.getHeight() - 20, { align: 'center' });
         }
     };
 
-    const isHierarchicalReport = reportType === 'budget_vs_actuals' || reportType === 'balance_sheet';
-
-    if (isHierarchicalReport) {
-        doc.autoTable({
-            head: headers,
-            body: body,
-            startY: 80,
-            theme: 'striped',
-            headStyles: { 
-                fillColor: '#346F4F', // --primary
-                textColor: '#F7F2ED', // --primary-foreground
-                fontSize: 10,
-                fontStyle: 'bold',
-            },
-            styles: { 
-                fontSize: 9, 
-                cellPadding: 6, // Increased padding
-                lineWidth: 0.2,
-                lineColor: '#DCD0C3' // --border
-            },
-            alternateRowStyles: { fillColor: '#FFFFFF' }, // No alternate color for this complex report
-            didDrawPage: (data) => {
-                addHeader(data.pageNumber);
-            },
-        });
-
-    } else { // Standard reports
-        doc.autoTable({
-            head: headers,
-            body: body.filter(row => !row[0]?._subTable),
-            startY: 80,
-            headStyles: { 
-                fillColor: '#346F4F', // --primary
-                textColor: '#F7F2ED', // --primary-foreground
-                fontSize: 10,
-                fontStyle: 'bold'
-            },
-            styles: { fontSize: 9, cellPadding: 6 }, // Increased padding
-            alternateRowStyles: { fillColor: '#FAF5F0' }, // --popover
-            didDrawPage: (data) => {
-                addHeader(data.pageNumber);
-            }
-        });
-        
-        if (total !== undefined) {
-            let finalYpos = (doc as any).lastAutoTable.finalY || 80;
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(
-                `Total: ${formatCurrency(total)}`,
-                pageWidth - 40,
-                finalYpos + 25,
-                { align: 'right' }
-            );
+    doc.autoTable({
+        head: headers,
+        body: body,
+        startY: 80,
+        theme: 'grid',
+        headStyles: { 
+            fillColor: '#346F4F',
+            textColor: '#F7F2ED',
+            fontSize: 10,
+            fontStyle: 'bold'
+        },
+        styles: { fontSize: 9, cellPadding: 8, lineColor: '#DCD0C3' },
+        didDrawPage: (data) => {
+            addHeader(data.pageNumber);
         }
+    });
+    
+    if (total !== undefined && reportType !== 'budget_vs_actuals' && reportType !== 'balance_sheet') {
+        let finalYpos = (doc as any).lastAutoTable.finalY || 80;
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Total: ${formatCurrency(total)}`, pageWidth - 40, finalYpos + 30, { align: 'right' });
     }
 
     addFooter();
-    doc.save(fileName);
+    doc.save(`${reportTitle.replace(/[\s/]/g, '_')}.pdf`);
 };
