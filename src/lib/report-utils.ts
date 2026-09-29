@@ -349,6 +349,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         head: headers,
         body: body,
         startY: 80,
+        margin: { top: 80 }, // Ensure space for header on every page
         theme: 'grid',
         headStyles: { 
             fillColor: '#346F4F',
