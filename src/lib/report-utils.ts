@@ -334,6 +334,17 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         }
     };
 
+    // Define column styles for standard reports to ensure right-alignment
+    const getColumnStyles = (type: string) => {
+        const styles: any = {};
+        if (type === 'income' || type === 'expenses') {
+            styles[4] = { halign: 'right' }; // Amount column
+        } else if (type === 'summary' || type === 'individual_tithe') {
+            styles[1] = { halign: 'right' }; // Amount column
+        }
+        return styles;
+    };
+
     doc.autoTable({
         head: headers,
         body: body,
@@ -346,6 +357,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
             fontStyle: 'bold'
         },
         styles: { fontSize: 9, cellPadding: 8, lineColor: '#DCD0C3' },
+        columnStyles: getColumnStyles(reportType),
         didDrawPage: (data) => {
             addHeader(data.pageNumber);
         }
