@@ -1,5 +1,4 @@
-
-'use server';
+'use client';
 
 import {
   collection,
@@ -13,6 +12,8 @@ import {
 import { db } from '@/lib/firebase';
 import type { AccountFormValues } from '@/types';
 import { logActivity } from './activityLogService';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 const ACCOUNTS_COLLECTION = 'accounts';
 
@@ -21,28 +22,32 @@ export const addAccount = async (
   budgets: Record<string, number>,
   userId: string,
   userEmail: string
-): Promise<string> => {
-  if (!userId) {
-    throw new Error('User ID is required to add an account.');
-  }
-  try {
-    const docRef = await addDoc(collection(db, ACCOUNTS_COLLECTION), {
-      ...accountData,
-      recordedByUserId: userId,
-      createdAt: serverTimestamp(),
-      budgets,
-    });
+): Promise<void> => {
+  if (!userId) throw new Error('User ID is required');
+  
+  const data = {
+    ...accountData,
+    recordedByUserId: userId,
+    createdAt: serverTimestamp(),
+    budgets,
+  };
 
-    await logActivity(userId, userEmail, "CREATE_ACCOUNT", {
-      recordId: docRef.id,
-      collectionName: ACCOUNTS_COLLECTION,
-      details: `Created new account: "${accountData.name}" (Code: ${accountData.code})`
+  addDoc(collection(db, ACCOUNTS_COLLECTION), data)
+    .then((docRef) => {
+      logActivity(userId, userEmail, "CREATE_ACCOUNT", {
+        recordId: docRef.id,
+        collectionName: ACCOUNTS_COLLECTION,
+        details: `Created new account: "${accountData.name}" (Code: ${accountData.code})`
+      });
+    })
+    .catch(async (error) => {
+      const permissionError = new FirestorePermissionError({
+        path: ACCOUNTS_COLLECTION,
+        operation: 'create',
+        requestResourceData: data,
+      });
+      errorEmitter.emit('permission-error', permissionError);
     });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error adding account: ', error);
-    throw new Error("Failed to create the account. The account code may already exist or there was a network issue.");
-  }
 };
 
 export const updateAccount = async (
@@ -51,22 +56,24 @@ export const updateAccount = async (
   userId: string,
   userEmail: string
 ): Promise<void> => {
-  if (!userId) {
-    throw new Error('User ID is required to update an account.');
-  }
-  try {
-    const accountRef = doc(db, ACCOUNTS_COLLECTION, accountId);
-    await updateDoc(accountRef, dataToUpdate as DocumentData);
-
-    await logActivity(userId, userEmail, "UPDATE_ACCOUNT", {
-      recordId: accountId,
-      collectionName: ACCOUNTS_COLLECTION,
-      details: `Updated account "${dataToUpdate.name}" (Code: ${dataToUpdate.code})`
+  const accountRef = doc(db, ACCOUNTS_COLLECTION, accountId);
+  
+  updateDoc(accountRef, dataToUpdate as DocumentData)
+    .then(() => {
+      logActivity(userId, userEmail, "UPDATE_ACCOUNT", {
+        recordId: accountId,
+        collectionName: ACCOUNTS_COLLECTION,
+        details: `Updated account "${dataToUpdate.name}" (Code: ${dataToUpdate.code})`
+      });
+    })
+    .catch(async () => {
+      const permissionError = new FirestorePermissionError({
+        path: accountRef.path,
+        operation: 'update',
+        requestResourceData: dataToUpdate,
+      });
+      errorEmitter.emit('permission-error', permissionError);
     });
-  } catch (error) {
-    console.error('Error updating account: ', error);
-    throw new Error("Failed to update the account.");
-  }
 };
 
 export const deleteAccount = async (
@@ -74,24 +81,24 @@ export const deleteAccount = async (
   userId: string,
   userEmail: string
 ): Promise<void> => {
-   if (!userId) {
-    throw new Error('User ID is required to delete an account.');
-  }
-  try {
-    // In a real-world scenario, you might want to fetch the account name before deleting.
-    // For this implementation, we will just log the ID.
-    await deleteDoc(doc(db, ACCOUNTS_COLLECTION, accountId));
-    await logActivity(userId, userEmail, "DELETE_ACCOUNT", {
-      recordId: accountId,
-      collectionName: ACCOUNTS_COLLECTION,
-      details: `Deleted account with ID: ${accountId}.`
+  const accountRef = doc(db, ACCOUNTS_COLLECTION, accountId);
+  
+  deleteDoc(accountRef)
+    .then(() => {
+      logActivity(userId, userEmail, "DELETE_ACCOUNT", {
+        recordId: accountId,
+        collectionName: ACCOUNTS_COLLECTION,
+        details: `Deleted account with ID: ${accountId}.`
+      });
+    })
+    .catch(async () => {
+      const permissionError = new FirestorePermissionError({
+        path: accountRef.path,
+        operation: 'delete',
+      });
+      errorEmitter.emit('permission-error', permissionError);
     });
-  } catch (error) {
-    console.error('Error deleting account: ', error);
-    throw new Error("Failed to delete the account. It may be in use in other records.");
-  }
 };
-
 
 export const setBudgetForYear = async (
   accountId: string,
@@ -100,26 +107,25 @@ export const setBudgetForYear = async (
   userId: string,
   userEmail: string
 ): Promise<void> => {
-  if (!userId) {
-    throw new Error('User ID is required to set a budget.');
-  }
-  try {
-    const accountRef = doc(db, ACCOUNTS_COLlection, accountId);
-    // Use dot notation to update a specific field in a map
-    const budgetField = `budgets.${year}`;
-    await updateDoc(accountRef, {
-      [budgetField]: budget
-    });
+  const accountRef = doc(db, 'accounts', accountId);
+  const budgetField = `budgets.${year}`;
+  const updateData = { [budgetField]: budget };
 
-    const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
-
-    await logActivity(userId, userEmail, "SET_BUDGET", {
-        recordId: accountId,
-        collectionName: ACCOUNTS_COLLECTION,
-        details: `Set budget for year ${year} to ${currencyFormatter.format(budget)} on account ${accountId}`
+  updateDoc(accountRef, updateData)
+    .then(() => {
+      const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 });
+      logActivity(userId, userEmail, "SET_BUDGET", {
+          recordId: accountId,
+          collectionName: ACCOUNTS_COLLECTION,
+          details: `Set budget for year ${year} to ${currencyFormatter.format(budget)} on account ${accountId}`
+      });
+    })
+    .catch(async () => {
+      const permissionError = new FirestorePermissionError({
+        path: accountRef.path,
+        operation: 'update',
+        requestResourceData: updateData,
+      });
+      errorEmitter.emit('permission-error', permissionError);
     });
-  } catch (error) {
-    console.error(`Error setting budget for year ${year}: `, error);
-    throw new Error(`Failed to set budget for ${year}.`);
-  }
 };

@@ -1,16 +1,17 @@
-
-'use server';
+'use client';
 
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { ActivityLogAction } from '@/types';
+import { errorEmitter } from '@/firebase/error-emitter';
+import { FirestorePermissionError } from '@/firebase/errors';
 
 const ACTIVITY_LOGS_COLLECTION = 'activity_logs';
 
 interface LogActivityDetails {
   recordId?: string;
   collectionName?: string;
-  details?: string; // For descriptive plain-English text
+  details?: string;
 }
 
 export const logActivity = async (
@@ -19,24 +20,25 @@ export const logActivity = async (
   action: ActivityLogAction,
   logDetails?: LogActivityDetails
 ): Promise<void> => {
-  if (!userId || !userEmail) {
-    console.warn('User ID or Email missing, skipping activity log for action:', action);
-    // For now, we'll just log a warning and not save the log.
-    return;
-  }
+  if (!userId || !userEmail) return;
 
-  try {
-    await addDoc(collection(db, ACTIVITY_LOGS_COLLECTION), {
-      userId,
-      userEmail,
-      action,
-      timestamp: serverTimestamp(),
-      details: logDetails?.details || undefined,
-      recordId: logDetails?.recordId || undefined,
-      collectionName: logDetails?.collectionName || undefined,
+  const data = {
+    userId,
+    userEmail,
+    action,
+    timestamp: serverTimestamp(),
+    details: logDetails?.details || undefined,
+    recordId: logDetails?.recordId || undefined,
+    collectionName: logDetails?.collectionName || undefined,
+  };
+
+  addDoc(collection(db, ACTIVITY_LOGS_COLLECTION), data)
+    .catch(async () => {
+       const permissionError = new FirestorePermissionError({
+        path: ACTIVITY_LOGS_COLLECTION,
+        operation: 'create',
+        requestResourceData: data,
+      });
+      errorEmitter.emit('permission-error', permissionError);
     });
-  } catch (error) {
-    console.error('Error logging activity: ', error, { userId, userEmail, action, logDetails });
-    // Decide if this error should be re-thrown or handled silently
-  }
 };
