@@ -1,0 +1,46 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper function to check if the user is signed in
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Allow authenticated users to read and write to all finance-related collections.
+    // This allows the finance team to perform all necessary operations.
+    
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /accounts/{accountId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /income_sources/{sourceId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /income_records/{recordId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /expense_sources/{sourceId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /expense_records/{recordId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /members/{memberId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /activity_logs/{logId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false; // Activity logs are immutable for audit integrity
+    }
+  }
+}

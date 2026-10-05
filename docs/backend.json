@@ -1,0 +1,141 @@
+
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Details of a registered regular user.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "A financial account in the chart of accounts.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["Income", "Expense", "Assets", "Liability", "Balance"] },
+        "budgets": { "type": "object", "additionalProperties": { "type": "number" } },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "name", "type", "recordedByUserId"]
+    },
+    "IncomeSource": {
+      "title": "Income Source",
+      "description": "A budgeted income category.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "transactionName": { "type": "string" },
+        "category": { "type": "string", "enum": ["Offering", "Tithe", "Donation", "Other"] },
+        "accountId": { "type": "string" },
+        "description": { "type": "string" },
+        "budgets": { "type": "object", "additionalProperties": { "type": "number" } },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "transactionName", "category", "recordedByUserId"]
+    },
+    "IncomeRecord": {
+      "title": "Income Record",
+      "description": "An actual income transaction.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "transactionName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "category": { "type": "string", "enum": ["Offering", "Tithe", "Donation", "Other"] },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "memberName": { "type": "string" },
+        "accountId": { "type": "string" },
+        "incomeSourceId": { "type": "string" },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "transactionName", "date", "category", "amount", "recordedByUserId"]
+    },
+    "ExpenseSource": {
+      "title": "Expense Source",
+      "description": "A budgeted expense category.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "expenseName": { "type": "string" },
+        "category": { "type": "string" },
+        "accountId": { "type": "string" },
+        "description": { "type": "string" },
+        "budgets": { "type": "object", "additionalProperties": { "type": "number" } },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "expenseName", "category", "recordedByUserId"]
+    },
+    "ExpenseRecord": {
+      "title": "Expense Record",
+      "description": "An actual expense transaction.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "expenseName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "payee": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "description": { "type": "string" },
+        "accountId": { "type": "string" },
+        "expenseSourceId": { "type": "string" },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "expenseName", "date", "category", "amount", "recordedByUserId"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "A church member.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "recordedByUserId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "recordedByUserId"]
+    },
+    "ActivityLog": {
+      "title": "Activity Log",
+      "description": "A record of system activity.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "details": { "type": "string" },
+        "collectionName": { "type": "string" },
+        "recordId": { "type": "string" }
+      },
+      "required": ["userId", "userEmail", "action", "timestamp"]
+    }
+  },
+  "auth": {
+    "providers": ["password"]
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": { "$ref": "#/entities/UserProfile" }, "description": "User profiles" },
+    "/accounts/{accountId}": { "schema": { "$ref": "#/entities/Account" }, "description": "Chart of accounts" },
+    "/income_sources/{sourceId}": { "schema": { "$ref": "#/entities/IncomeSource" }, "description": "Budgeted income items" },
+    "/income_records/{recordId}": { "schema": { "$ref": "#/entities/IncomeRecord" }, "description": "Income transactions" },
+    "/expense_sources/{sourceId}": { "schema": { "$ref": "#/entities/ExpenseSource" }, "description": "Budgeted expense items" },
+    "/expense_records/{recordId}": { "schema": { "$ref": "#/entities/ExpenseRecord" }, "description": "Expense transactions" },
+    "/members/{memberId}": { "schema": { "$ref": "#/entities/Member" }, "description": "Church members" },
+    "/activity_logs/{logId}": { "schema": { "$ref": "#/entities/ActivityLog" }, "description": "System activity logs" }
+  }
+}
