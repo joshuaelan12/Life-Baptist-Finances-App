@@ -13,7 +13,6 @@ interface jsPDFWithAutoTable extends jsPDF {
 
 const formatCurrency = (val: number | null | undefined) => {
     if (typeof val !== 'number') return '0 XAF';
-    // Use en-US locale for consistent comma separators, and append XAF
     return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' XAF';
 };
 
@@ -26,7 +25,7 @@ interface ReportOptions {
     expenseSources?: ExpenseSource[];
     startDate?: Date;
     endDate?: Date;
-    typeFilter?: AccountType[]; // Added to filter hierarchical reports
+    typeFilter?: AccountType[]; 
 }
 
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
@@ -36,6 +35,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
     const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
     const accounts = data as Account[];
+    const accountsMap = new Map(accounts.map(acc => [acc.id, acc]));
     const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate } = options;
 
     const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
@@ -49,10 +49,14 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
     let grandBudgetTotal = 0;
     let grandRealizedTotal = 0;
 
+    // Track which records have been "claimed" by an account to identify unassigned ones
+    const claimedIncomeIds = new Set<string>();
+    const claimedExpenseIds = new Set<string>();
+
     typeOrder.forEach(type => {
         const relevantAccounts = accounts.filter(acc => acc.type === type);
         if (relevantAccounts.length > 0) {
-            csvData.push([type.toUpperCase()]); // Main Type Header
+            csvData.push([type.toUpperCase()]); 
             
             let typeBudgetTotal = 0;
             let typeRealizedTotal = 0;
@@ -63,15 +67,29 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                 const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                 const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
                 
-                const incomeFromDirectRecords = filteredIncomeRecords.filter(r => r.accountId === account.id && !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
-                const expenseFromDirectRecords = filteredExpenseRecords.filter(r => r.accountId === account.id && !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+                const directIncomeRecords = filteredIncomeRecords.filter(r => r.accountId === account.id);
+                const directExpenseRecords = filteredExpenseRecords.filter(r => r.accountId === account.id);
 
-                const realizedFromSources = (type === 'Income' ? relevantIncomeSources : relevantExpenseSources).reduce((sum, source) => {
-                    const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
-                    return sum + records.reduce((s, r) => s + r.amount, 0);
-                }, 0);
+                directIncomeRecords.forEach(r => claimedIncomeIds.add(r.id));
+                directExpenseRecords.forEach(r => claimedExpenseIds.add(r.id));
 
-                const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
+                // Calculate sub-sources logic
+                let realizedFromSources = 0;
+                const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
+                sources.forEach(source => {
+                    const records = type === 'Income' 
+                        ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) 
+                        : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
+                    records.forEach(r => type === 'Income' ? claimedIncomeIds.add(r.id) : claimedExpenseIds.add(r.id));
+                    realizedFromSources += records.reduce((s, r) => s + r.amount, 0);
+                });
+
+                // Calculate direct records not caught by source filter
+                const directIncomeAmount = directIncomeRecords.filter(r => !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
+                const directExpenseAmount = directExpenseRecords.filter(r => !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+
+                // FIX: For expenses, we sum them as positive "actuals spent"
+                const accountRealized = realizedFromSources + (type === 'Income' ? directIncomeAmount : directExpenseAmount);
                 const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                 
                 typeBudgetTotal += accountBudget;
@@ -87,7 +105,6 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                     `${accountPercentage.toFixed(1)}%`
                 ]);
 
-                const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
                     const sourceBudget = source.budgets?.[budgetYear] || (source.budget || 0);
                     const records = type === 'Income' ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id) : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
@@ -106,7 +123,6 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                 });
             });
 
-            // Section Totals for CSV
             csvData.push([
                 `TOTAL ${type.toUpperCase()}`,
                 '',
@@ -116,7 +132,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                 typeRealizedTotal,
                 `${typeBudgetTotal > 0 ? ((typeRealizedTotal / typeBudgetTotal) * 100).toFixed(1) : '0.0'}%`
             ]);
-            csvData.push([]); // Empty row for spacing
+            csvData.push([]); 
 
             if (type === 'Income') {
                 grandBudgetTotal += typeBudgetTotal;
@@ -128,8 +144,24 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
         }
     });
 
-    // Grand Summary for CSV
-    csvData.push(['GRAND SUMMARY']);
+    // Handle Unassigned (The Dashboard "Catch-all")
+    const unassignedIncome = filteredIncomeRecords.filter(r => !claimedIncomeIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
+    const unassignedExpense = filteredExpenseRecords.filter(r => !claimedExpenseIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
+
+    if (unassignedIncome > 0 || unassignedExpense > 0) {
+        csvData.push(['UNASSIGNED TRANSACTIONS (NOT IN CHART OF ACCOUNTS)']);
+        if (unassignedIncome > 0) {
+            csvData.push(['Income', '', 'General/Unlinked Income', 'Other', 0, unassignedIncome, 'N/A']);
+            grandRealizedTotal += unassignedIncome;
+        }
+        if (unassignedExpense > 0) {
+            csvData.push(['Expense', '', 'General/Unlinked Expenses', 'Other', 0, unassignedExpense, 'N/A']);
+            grandRealizedTotal -= unassignedExpense;
+        }
+        csvData.push([]);
+    }
+
+    csvData.push(['GRAND SUMMARY: NET POSITION']);
     csvData.push(['Net Position', '', '', '', grandBudgetTotal, grandRealizedTotal, '']);
 
     return csvData;
@@ -206,6 +238,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
         case 'balance_sheet':
              const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
              const accounts = data as Account[];
+             const accountsMap = new Map(accounts.map(acc => [acc.id, acc]));
              const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear() } = options;
 
              const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
@@ -215,6 +248,10 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
 
              const filteredIncomeRecords = filterByDate(incomeRecords);
              const filteredExpenseRecords = filterByDate(expenseRecords);
+
+             // Track claimed records to identify unassigned one
+             const claimedIncomeIds = new Set<string>();
+             const claimedExpenseIds = new Set<string>();
 
              headers.push(['A/C# / Name', 'Description / Category', `Budget for ${budgetYear}`, `Realized: ${options.periodString}`, '% Realized']);
 
@@ -234,17 +271,27 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const relevantIncomeSources = incomeSources.filter(s => s.accountId === account.id);
                          const relevantExpenseSources = expenseSources.filter(s => s.accountId === account.id);
                          
-                         const incomeFromDirectRecords = filteredIncomeRecords.filter(r => r.accountId === account.id && !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
-                         const expenseFromDirectRecords = filteredExpenseRecords.filter(r => r.accountId === account.id && !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+                         const directIncomeRecords = filteredIncomeRecords.filter(r => r.accountId === account.id);
+                         const directExpenseRecords = filteredExpenseRecords.filter(r => r.accountId === account.id);
 
-                         const realizedFromSources = (type === 'Income' ? relevantIncomeSources : relevantExpenseSources).reduce((sum, source) => {
+                         directIncomeRecords.forEach(r => claimedIncomeIds.add(r.id));
+                         directExpenseRecords.forEach(r => claimedExpenseIds.add(r.id));
+
+                         let realizedFromSources = 0;
+                         const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
+                         sources.forEach(source => {
                             const records = type === 'Income'
                                 ? filteredIncomeRecords.filter(r => r.incomeSourceId === source.id)
                                 : filteredExpenseRecords.filter(r => r.expenseSourceId === source.id);
-                            return sum + records.reduce((s, r) => s + r.amount, 0);
-                         }, 0);
+                            records.forEach(r => type === 'Income' ? claimedIncomeIds.add(r.id) : claimedExpenseIds.add(r.id));
+                            realizedFromSources += records.reduce((s, r) => s + r.amount, 0);
+                         });
 
-                         const accountRealized = realizedFromSources + (type === 'Income' ? incomeFromDirectRecords : -expenseFromDirectRecords);
+                         const directIncomeAmount = directIncomeRecords.filter(r => !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
+                         const directExpenseAmount = directExpenseRecords.filter(r => !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
+
+                         // FIX: Both additions should be positive for spent/received "Actuals"
+                         const accountRealized = realizedFromSources + (type === 'Income' ? directIncomeAmount : directExpenseAmount);
                          const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                          
                          typeBudgetTotal += accountBudget;
@@ -258,7 +305,6 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                              { content: `${accountPercentage.toFixed(1)}%`, styles: { halign: 'right', fillColor: '#F8F9FA' } }
                          ]);
 
-                         const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                          sources.forEach(source => {
                              const sourceBudget = source.budgets?.[budgetYear] || (source.budget || 0);
                              const records = type === 'Income' 
@@ -277,7 +323,6 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          });
                      });
 
-                     // Category Total Row
                      body.push([
                          { content: `TOTAL ${type.toUpperCase()}`, colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } },
                          { content: formatCurrency(typeBudgetTotal), styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } },
@@ -290,7 +335,22 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                  }
              });
 
-             // Grand Total Row
+             // Unassigned section for visual parity with Dashboard
+             const unassignedIncome = filteredIncomeRecords.filter(r => !claimedIncomeIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
+             const unassignedExpense = filteredExpenseRecords.filter(r => !claimedExpenseIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
+
+             if (unassignedIncome > 0 || unassignedExpense > 0) {
+                 body.push([{ content: 'UNASSIGNED TRANSACTIONS (NOT IN CHART OF ACCOUNTS)', colSpan: 5, styles: { fontStyle: 'italic', fillColor: '#F0F0F0', halign: 'center', fontSize: 8 } }]);
+                 if (unassignedIncome > 0) {
+                    body.push([{ content: 'General/Unlinked Income', styles: { cellPadding: { left: 10 } } }, 'Other', formatCurrency(0), formatCurrency(unassignedIncome), 'N/A']);
+                    grandRealizedTotal += unassignedIncome;
+                 }
+                 if (unassignedExpense > 0) {
+                    body.push([{ content: 'General/Unlinked Expenses', styles: { cellPadding: { left: 10 } } }, 'Other', formatCurrency(0), formatCurrency(unassignedExpense), 'N/A']);
+                    grandRealizedTotal -= unassignedExpense;
+                 }
+             }
+
              body.push([
                 { content: 'GRAND SUMMARY: NET POSITION', colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
                 { content: formatCurrency(grandBudgetTotal), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
@@ -335,13 +395,12 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         }
     };
 
-    // Define column styles for standard reports to ensure right-alignment
     const getColumnStyles = (type: string) => {
         const styles: any = {};
         if (type === 'income' || type === 'expenses') {
-            styles[4] = { halign: 'right' }; // Amount column
+            styles[4] = { halign: 'right' }; 
         } else if (type === 'summary' || type === 'individual_tithe') {
-            styles[1] = { halign: 'right' }; // Amount column
+            styles[1] = { halign: 'right' }; 
         }
         return styles;
     };
@@ -350,7 +409,7 @@ export const downloadPdf = (data: any[], reportTitle: string, reportType: string
         head: headers,
         body: body,
         startY: 80,
-        margin: { top: 80 }, // Ensure space for header on every page
+        margin: { top: 80 }, 
         theme: 'grid',
         headStyles: { 
             fillColor: '#346F4F',
