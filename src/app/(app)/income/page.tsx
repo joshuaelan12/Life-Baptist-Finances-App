@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit, Coins, User, CalendarIcon } from "lucide-react";
+import { PlusCircle, Trash2, Loader2, AlertTriangle, DollarSign, Edit, Coins, User, CalendarIcon, Info } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -100,18 +100,17 @@ export default function IncomePage() {
     },
   });
 
-  const transactionForm = useForm<IncomeFormValues & { incomeSourceId?: string }>({
-    resolver: zodResolver(incomeSchema.extend({ incomeSourceId: z.string().min(1, "Fund is required") })),
+  const transactionForm = useForm<IncomeFormValues>({
+    resolver: zodResolver(incomeSchema),
     defaultValues: {
         code: "",
         transactionName: "",
         date: new Date(),
         amount: 0,
         category: "Offering",
-        accountId: "placeholder", // Not directly used in Quick Record now
+        accountId: "",
         description: "",
         memberName: "",
-        incomeSourceId: "",
     }
   });
 
@@ -123,8 +122,9 @@ export default function IncomePage() {
   const [incomeSources, loadingSources, errorSources] = useCollectionData(incomeSourcesQuery);
   
   const incomeRecordsQuery = useMemo(() => authUser ? collection(db, 'income_records').withConverter(incomeRecordConverter) : null, [authUser]);
-  const [incomeRecords, loadingRecords, errorRecords] = useCollectionData(incomeRecordsQuery);
+  const [incomeRecords, loadingRecords] = useCollectionData(incomeRecordsQuery);
   
+  // Explicitly fetch only accounts with type 'Income'
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [incomeAccounts, loadingAccounts] = useCollectionData(accountsQuery);
 
@@ -159,25 +159,20 @@ export default function IncomePage() {
     }
   };
 
-  const onTransactionSubmit = async (data: IncomeFormValues & { incomeSourceId?: string }) => {
+  const onTransactionSubmit = async (data: IncomeFormValues) => {
     if (!authUser?.uid || !authUser.email) return;
     
-    if (!data.incomeSourceId) {
-        toast({ variant: "destructive", title: "Config Error", description: "No budgeted income category selected." });
-        return;
-    }
-
-    const source = incomeSources?.find(s => s.id === data.incomeSourceId);
-    if (!source) return;
+    // Auto-link to a matching budgeted source for reports
+    const source = incomeSources?.find(s => s.accountId === data.accountId && s.category === data.category);
+    const sourceId = source?.id || "";
 
     setIsSubmitting(true);
     try {
         const finalData = { 
             ...data, 
-            accountId: source.accountId || "",
             memberName: data.memberName === "none" ? "" : data.memberName 
         };
-        await addIncomeTransaction(finalData, source.id, authUser.uid, authUser.email);
+        await addIncomeTransaction(finalData, sourceId, authUser.uid, authUser.email);
         toast({ title: "Success", description: "Transaction recorded successfully." });
         setIsQuickRecordOpen(false);
         transactionForm.reset();
@@ -246,12 +241,15 @@ export default function IncomePage() {
   };
 
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
-  const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords || loadingMembers;
+  const isLoading = authLoading || loadingSources || loadingAccounts || loadingMembers;
 
-  const quickRecordCategory = transactionForm.watch('category');
-  const availableFunds = useMemo(() => {
-    return incomeSources?.filter(s => s.category === quickRecordCategory) || [];
-  }, [incomeSources, quickRecordCategory]);
+  if (isLoading && !authUser) {
+    return (
+        <div className="flex justify-center items-center h-screen">
+          <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        </div>
+    );
+  }
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -303,6 +301,7 @@ export default function IncomePage() {
                             <FormControl><SelectTrigger><SelectValue placeholder="Select an income account" /></SelectTrigger></FormControl>
                             <SelectContent>{incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
                             </Select>
+                            <FormDescription>Pick an account with type 'Income'.</FormDescription>
                         <FormMessage /></FormItem>
                     )}/>
                     <FormField control={sourceForm.control} name="amount" render={({ field }) => (
@@ -311,7 +310,7 @@ export default function IncomePage() {
                         <FormMessage /></FormItem>
                     )}/>
                 </div>
-                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting || !authUser}>
+                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting}>
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
                    Create Income Source
                 </Button>
@@ -338,8 +337,8 @@ export default function IncomePage() {
           </div>
         </CardHeader>
         <CardContent>
-           {isLoading && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
-          {!isLoading && incomeSources && incomeSources.length > 0 && (
+           {loadingSources && <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Loading records...</p></div>}
+          {!loadingSources && incomeSources && incomeSources.length > 0 && (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -371,7 +370,7 @@ export default function IncomePage() {
                               <TableCell>{percentage.toFixed(1)}%</TableCell>
                               <TableCell className="text-right space-x-1">
                                 <Button variant="ghost" size="icon" onClick={() => handleOpenBudgetDialog(source)} aria-label="Set Budget"><Coins className="h-4 w-4" /></Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={!authUser || isSubmitting} aria-label="Edit income source"><Edit className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleOpenEditDialog(source)} disabled={isSubmitting} aria-label="Edit income source"><Edit className="h-4 w-4" /></Button>
                                 <AlertDialog>
                                     <AlertDialogTrigger asChild><Button variant="ghost" size="icon" aria-label="Delete income source"><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
                                     <AlertDialogContent>
@@ -402,7 +401,7 @@ export default function IncomePage() {
                     <div className="grid md:grid-cols-2 gap-4">
                         <FormField control={transactionForm.control} name="category" render={({ field }) => (
                             <FormItem><FormLabel>Category</FormLabel>
-                                <Select onValueChange={(val) => { field.onChange(val); transactionForm.setValue('incomeSourceId', ''); }} value={field.value}>
+                                <Select onValueChange={field.onChange} value={field.value}>
                                     <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
                                     <SelectContent>
                                         <SelectItem value="Offering">Offering</SelectItem>
@@ -413,17 +412,17 @@ export default function IncomePage() {
                                 </Select>
                             <FormMessage /></FormItem>
                         )}/>
-                        <FormField control={transactionForm.control} name="incomeSourceId" render={({ field }) => (
-                            <FormItem><FormLabel>Income Fund Source</FormLabel>
+                        <FormField control={transactionForm.control} name="accountId" render={({ field }) => (
+                            <FormItem><FormLabel>Income Account</FormLabel>
                                 <Select onValueChange={field.onChange} value={field.value}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder={availableFunds.length > 0 ? "Select fund" : "No funds found"}/></SelectTrigger></FormControl>
+                                    <FormControl><SelectTrigger><SelectValue placeholder="Select account"/></SelectTrigger></FormControl>
                                     <SelectContent>
-                                        {availableFunds.map(s => (
-                                            <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>
+                                        {incomeAccounts?.map(acc => (
+                                            <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <FormDescription>Select which budgeted fund this belongs to.</FormDescription>
+                                <FormDescription className="flex items-center gap-1"><Info className="h-3 w-3" /> Accounts with type 'Income'.</FormDescription>
                             <FormMessage /></FormItem>
                         )}/>
                     </div>
@@ -492,7 +491,7 @@ export default function IncomePage() {
       <Dialog open={isBudgetDialogOpen} onOpenChange={setIsBudgetDialogOpen}>
           <DialogContent>
               <DialogHeader><DialogTitle>Set Budget for {selectedYear}</DialogTitle><DialogDescription>Enter the total budget for "{editingSource?.transactionName}" for the year {selectedYear}.</DialogDescription></DialogHeader>
-              <Form budgetForm>
+              <Form {...budgetForm}>
                   <form onSubmit={budgetForm.handleSubmit(handleSetBudget)} className="space-y-4 py-4">
                       <FormField control={budgetForm.control} name="budget" render={({ field }) => (
                           <FormItem><FormLabel>Budget Amount (XAF)</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>

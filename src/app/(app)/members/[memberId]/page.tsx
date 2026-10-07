@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues, IncomeSource, IncomeSourceFirestore } from '@/types';
+import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues, IncomeSource, IncomeSourceFirestore, Account, AccountFirestore } from '@/types';
 import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins, Edit, Trash2, CalendarIcon, PlusCircle, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -65,6 +65,18 @@ const incomeSourceConverter = {
     toFirestore: (source: IncomeSource) => source,
 };
 
+const accountConverter = {
+    fromFirestore: (snapshot: any, options: any): Account => {
+        const data = snapshot.data(options) as Omit<AccountFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as Account;
+    },
+    toFirestore: (account: Account) => account,
+};
+
 export default function MemberTitheDetailsPage() {
     const router = useRouter();
     const params = useParams();
@@ -82,6 +94,9 @@ export default function MemberTitheDetailsPage() {
     const sourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), where('category', '==', 'Tithe')) : null, [authUser]);
     const [titheSources, loadingSources] = useCollectionData(sourcesQuery?.withConverter(incomeSourceConverter));
 
+    const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
+    const [incomeAccounts, loadingAccounts] = useCollectionData(accountsQuery);
+
     const titheQuery = useMemo(() => 
         member ? query(
             collection(db, 'income_records'), 
@@ -93,12 +108,8 @@ export default function MemberTitheDetailsPage() {
     
     const [titheRecords, loadingTithes, errorTithes] = useCollectionData(titheQuery);
 
-    const titheFormSchema = incomeSchema.extend({
-        incomeSourceId: z.string().min(1, "Please select a fund source")
-    });
-
-    const form = useForm<z.infer<typeof titheFormSchema>>({
-        resolver: zodResolver(titheFormSchema),
+    const form = useForm<IncomeFormValues>({
+        resolver: zodResolver(incomeSchema),
         defaultValues: {
             code: "",
             transactionName: "",
@@ -106,9 +117,8 @@ export default function MemberTitheDetailsPage() {
             amount: 0,
             description: "",
             category: "Tithe",
-            accountId: "placeholder",
+            accountId: "",
             memberName: "",
-            incomeSourceId: "",
         },
     });
 
@@ -123,7 +133,7 @@ export default function MemberTitheDetailsPage() {
         return titheRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
     }, [titheRecords]);
 
-    const handleUpdate = async (data: z.infer<typeof titheFormSchema>) => {
+    const handleUpdate = async (data: IncomeFormValues) => {
         if (!authUser || !editingTransaction) return;
         try {
             await updateIncomeTransaction(editingTransaction.id, data, authUser.uid, authUser.email);
@@ -135,18 +145,15 @@ export default function MemberTitheDetailsPage() {
         }
     };
 
-    const handleAdd = async (data: z.infer<typeof titheFormSchema>) => {
+    const handleAdd = async (data: IncomeFormValues) => {
         if (!authUser || !member) return;
         
-        const selectedSource = titheSources?.find(s => s.id === data.incomeSourceId);
-        if (!selectedSource) {
-            toast({ variant: "destructive", title: "Config Error", description: "Please select a valid fund source for this tithe." });
-            return;
-        }
+        // Find matching budget source based on selected account
+        const source = titheSources?.find(s => s.accountId === data.accountId);
+        const sourceId = source?.id || "";
 
         try {
-            const finalData = { ...data, accountId: selectedSource.accountId || "" };
-            await addIncomeTransaction(finalData, selectedSource.id, authUser.uid, authUser.email);
+            await addIncomeTransaction(data, sourceId, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Tithe recorded successfully." });
             setIsAddDialogOpen(false);
             form.reset({
@@ -156,9 +163,8 @@ export default function MemberTitheDetailsPage() {
                 amount: 0,
                 description: "",
                 category: "Tithe",
-                accountId: "placeholder",
+                accountId: incomeAccounts && incomeAccounts.length > 0 ? incomeAccounts[0].id : "",
                 memberName: member.fullName,
-                incomeSourceId: selectedSource.id,
             });
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record tithe." });
@@ -184,9 +190,8 @@ export default function MemberTitheDetailsPage() {
             amount: transaction.amount,
             description: transaction.description || "",
             category: "Tithe",
-            accountId: transaction.accountId || "placeholder",
+            accountId: transaction.accountId || "",
             memberName: transaction.memberName || member?.fullName || "",
-            incomeSourceId: transaction.incomeSourceId || "",
         });
         setIsEditDialogOpen(true);
     };
@@ -195,10 +200,10 @@ export default function MemberTitheDetailsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const isLoading = loadingMember || loadingTithes || authLoading || loadingSources;
+    const isLoading = loadingMember || loadingTithes || authLoading || loadingSources || loadingAccounts;
     const error = errorMember || errorTithes || authError;
 
-    if (isLoading) {
+    if (isLoading && !member) {
         return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
     }
 
@@ -278,7 +283,7 @@ export default function MemberTitheDetailsPage() {
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Record Tithe for {member.fullName}</DialogTitle>
-                        <DialogDescription>Enter the details for a tithe payment. Ensure an Income Source with category "Tithe" exists.</DialogDescription>
+                        <DialogDescription>Enter payment details and select the income account.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleAdd)} className="space-y-4 py-4">
@@ -290,15 +295,15 @@ export default function MemberTitheDetailsPage() {
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
-                            <FormField control={form.control} name="incomeSourceId" render={({ field }) => (
-                                <FormItem><FormLabel>Income Fund Source</FormLabel>
+                            <FormField control={form.control} name="accountId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Account</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder={titheSources && titheSources.length > 0 ? "Select budget category" : "No tithe funds found"}/></SelectTrigger></FormControl>
+                                        <FormControl><SelectTrigger><SelectValue placeholder={incomeAccounts && incomeAccounts.length > 0 ? "Select account" : "No income accounts found"}/></SelectTrigger></FormControl>
                                         <SelectContent>
-                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}
+                                            {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                    <FormDescription className="flex items-center gap-1"><Info className="h-3 w-3" /> Connects this payment to a budget category in reports.</FormDescription>
+                                    <FormDescription className="flex items-center gap-1"><Info className="h-3 w-3" /> Showing accounts with type 'Income'.</FormDescription>
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={form.control} name="code" render={({ field }) => (
@@ -333,12 +338,12 @@ export default function MemberTitheDetailsPage() {
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
-                            <FormField control={form.control} name="incomeSourceId" render={({ field }) => (
-                                <FormItem><FormLabel>Income Fund Source</FormLabel>
+                            <FormField control={form.control} name="accountId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Account</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Select fund" /></SelectTrigger></FormControl>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger></FormControl>
                                         <SelectContent>
-                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}
+                                            {incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 <FormMessage /></FormItem>

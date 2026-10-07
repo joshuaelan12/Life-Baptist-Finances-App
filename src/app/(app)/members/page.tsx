@@ -20,7 +20,7 @@ import { useCollectionData } from 'react-firebase-hooks/firestore';
 import { collection, query, orderBy, Timestamp, where } from 'firebase/firestore';
 import { addMember, updateMember, deleteMember } from '@/services/memberService';
 import { addIncomeTransaction } from '@/services/incomeTransactionService';
-import type { Member, MemberFirestore, MemberFormValues, IncomeRecord, IncomeRecordFirestore, IncomeSource, IncomeSourceFirestore, IncomeFormValues } from '@/types';
+import type { Member, MemberFirestore, MemberFormValues, IncomeRecord, IncomeRecordFirestore, IncomeSource, IncomeSourceFirestore, IncomeFormValues, Account, AccountFirestore } from '@/types';
 import { memberSchema, incomeSchema } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { format } from 'date-fns';
@@ -64,6 +64,18 @@ const incomeSourceConverter = {
     toFirestore: (source: IncomeSource) => source,
 };
 
+const accountConverter = {
+    fromFirestore: (snapshot: any, options: any): Account => {
+        const data = snapshot.data(options) as Omit<AccountFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as Account;
+    },
+    toFirestore: (account: Account) => account,
+};
+
 export default function MembersPage() {
     const { toast } = useToast();
     const [authUser, authLoading, authError] = useAuthState(auth);
@@ -79,8 +91,8 @@ export default function MembersPage() {
         defaultValues: { fullName: "" },
     });
 
-    const titheForm = useForm<IncomeFormValues & { incomeSourceId?: string }>({
-        resolver: zodResolver(incomeSchema.extend({ incomeSourceId: z.string().min(1, "Fund is required") })),
+    const titheForm = useForm<IncomeFormValues>({
+        resolver: zodResolver(incomeSchema),
     });
 
     const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
@@ -91,6 +103,9 @@ export default function MembersPage() {
 
     const sourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), where('category', '==', 'Tithe')) : null, [authUser]);
     const [titheSources, loadingSources] = useCollectionData(sourcesQuery?.withConverter(incomeSourceConverter));
+
+    const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
+    const [incomeAccounts, loadingAccounts] = useCollectionData(accountsQuery);
 
     const filteredMembers = useMemo(() => {
         if (!members) return [];
@@ -131,19 +146,16 @@ export default function MembersPage() {
         }
     };
 
-    const handleTitheSubmit = async (data: IncomeFormValues & { incomeSourceId?: string }) => {
-        if (!authUser || !selectedMemberForTithe || !data.incomeSourceId) return;
+    const handleTitheSubmit = async (data: IncomeFormValues) => {
+        if (!authUser || !selectedMemberForTithe) return;
         
-        const selectedSource = titheSources?.find(s => s.id === data.incomeSourceId);
-        if (!selectedSource) {
-             toast({ variant: "destructive", title: "Fund Error", description: "Please select a valid income source for tithes." });
-             return;
-        }
+        // Find matching budget source in background
+        const source = titheSources?.find(s => s.accountId === data.accountId);
+        const sourceId = source?.id || "";
 
         setIsSubmitting(true);
         try {
-            const finalData = { ...data, accountId: selectedSource.accountId || "" };
-            await addIncomeTransaction(finalData, selectedSource.id, authUser.uid, authUser.email);
+            await addIncomeTransaction(data, sourceId, authUser.uid, authUser.email);
             toast({ title: "Success", description: `Tithe recorded for ${selectedMemberForTithe.fullName}.` });
             setIsTitheDialogOpen(false);
             setSelectedMemberForTithe(null);
@@ -162,7 +174,7 @@ export default function MembersPage() {
 
     const openTitheDialog = (member: Member) => {
         setSelectedMemberForTithe(member);
-        const defaultSource = titheSources && titheSources.length > 0 ? titheSources[0] : null;
+        const defaultAccount = incomeAccounts && incomeAccounts.length > 0 ? incomeAccounts[0] : null;
         titheForm.reset({
             code: "",
             transactionName: `Tithe - ${member.fullName}`,
@@ -170,9 +182,8 @@ export default function MembersPage() {
             amount: 0,
             description: "",
             category: "Tithe",
-            accountId: "placeholder",
+            accountId: defaultAccount?.id || "",
             memberName: member.fullName,
-            incomeSourceId: defaultSource?.id || "",
         });
         setIsTitheDialogOpen(true);
     };
@@ -202,7 +213,7 @@ export default function MembersPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const isLoading = authLoading || loadingMembers || loadingTithes || loadingSources;
+    const isLoading = authLoading || loadingMembers || loadingTithes || loadingSources || loadingAccounts;
     const dataError = authError || errorMembers || errorTithes;
 
     if (isLoading) {
@@ -333,7 +344,7 @@ export default function MembersPage() {
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Quick Record Tithe: {selectedMemberForTithe?.fullName}</DialogTitle>
-                        <DialogDescription>Enter tithe details. Ensure you have an Income Source with category "Tithe".</DialogDescription>
+                        <DialogDescription>Enter tithe details and select the income account.</DialogDescription>
                     </DialogHeader>
                     <Form {...titheForm}>
                         <form onSubmit={titheForm.handleSubmit(handleTitheSubmit)} className="space-y-4 py-4">
@@ -347,14 +358,14 @@ export default function MembersPage() {
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
-                            <FormField control={titheForm.control} name="incomeSourceId" render={({ field }) => (
-                                <FormItem><FormLabel>Income Fund Source</FormLabel>
+                            <FormField control={titheForm.control} name="accountId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Account</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder={titheSources && titheSources.length > 0 ? "Select budget category" : "No tithe funds found"}/></SelectTrigger></FormControl>
-                                        <SelectContent>{titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}</SelectContent>
+                                        <FormControl><SelectTrigger><SelectValue placeholder={incomeAccounts && incomeAccounts.length > 0 ? "Select income account" : "No income accounts found"}/></SelectTrigger></FormControl>
+                                        <SelectContent>{incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
                                     </Select>
                                     <FormDescription className="flex items-center gap-1">
-                                        <Info className="h-3 w-3" /> Connects this tithe to your general church budget categories.
+                                        <Info className="h-3 w-3" /> Select the finance account where this money was deposited.
                                     </FormDescription>
                                 <FormMessage /></FormItem>
                             )}/>
