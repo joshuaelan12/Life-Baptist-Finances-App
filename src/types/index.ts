@@ -9,12 +9,8 @@ export const incomeSourceSchema = z.object({
   category: z.enum(["Offering", "Tithe", "Donation", "Other"], { required_error: "Category is required." }),
   accountId: z.string().min(1, { message: "Account is required." }),
   description: z.string().optional(),
-  // For non-Tithe items, this will be the budget. For Tithes, it's the actual amount.
-  amount: z.coerce.number().min(0, { message: "Amount or Budget must be zero or more." }),
-  memberName: z.string().optional(),
-}).refine(data => data.category !== "Tithe" || (data.category === "Tithe" && data.memberName && data.memberName.length > 0), {
-  message: "Member name is required for tithes.",
-  path: ["memberName"],
+  // For sources, this represents the budget
+  amount: z.coerce.number().min(0, { message: "Initial Budget must be zero or more." }),
 });
 export type IncomeSourceFormValues = z.infer<typeof incomeSourceSchema>;
 
@@ -48,7 +44,6 @@ export interface IncomeSource {
 
 
 // Tithes are now a special type of direct transaction within the income system.
-// The existing IncomeRecord can represent a tithe transaction directly.
 export type IncomeCategory = "Offering" | "Tithe" | "Donation" | "Other";
 
 export const incomeSchema = z.object({
@@ -64,7 +59,7 @@ export const incomeSchema = z.object({
 export type IncomeFormValues = z.infer<typeof incomeSchema>;
 
 
-// This now represents a single transaction record (for tithes or for transactions under an income source)
+// This now represents a single transaction record
 export interface IncomeRecordFirestore {
   id: string;
   code: string;
@@ -300,22 +295,6 @@ export interface ActivityLogRecordFirestore {
 }
 
 // User Profile Types
-export interface UserProfile {
-  id: string;
-  email: string;
-  displayName: string;
-  role: 'admin' | 'user';
-  createdAt?: Date;
-}
-
-export interface UserProfileFirestore {
-  email: string;
-  displayName: string;
-  role: 'admin' | 'user';
-  createdAt: Timestamp;
-}
-
-// Chart of Accounts Types
 export const accountTypes = ["Income", "Expense", "Assets", "Liability", "Balance"] as const;
 export type AccountType = typeof accountTypes[number];
 

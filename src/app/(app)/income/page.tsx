@@ -18,7 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import type { IncomeSource, IncomeSourceFormValues, IncomeCategory, IncomeSourceFirestore, Account, AccountFirestore, Member, MemberFirestore, IncomeRecord } from '@/types';
 import { incomeSourceSchema } from '@/types';
-import { addIncomeSource, deleteIncomeSource, updateIncomeSource, addTitheTransaction } from '@/services/incomeService';
+import { addIncomeSource, deleteIncomeSource, updateIncomeSource } from '@/services/incomeService';
 import { useToast } from "@/hooks/use-toast";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -63,18 +63,6 @@ const accountConverter = {
     toFirestore: (account: Account) => account,
 };
 
-const memberConverter = {
-    fromFirestore: (snapshot: any): Member => {
-        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
-        return {
-            id: snapshot.id,
-            ...data,
-            createdAt: (data.createdAt as Timestamp)?.toDate(),
-        };
-    },
-    toFirestore: (member: Member) => member,
-};
-
 export default function IncomePage() {
   const { toast } = useToast();
   const [authUser, authLoading] = useAuthState(auth);
@@ -92,7 +80,6 @@ export default function IncomePage() {
       category: undefined,
       amount: 0,
       description: "",
-      memberName: "",
       accountId: "",
     },
   });
@@ -100,7 +87,6 @@ export default function IncomePage() {
   const budgetForm = useForm<{ budget: number }>({
       resolver: zodResolver(z.object({ budget: z.coerce.number().min(0, "Budget must be zero or more.") })),
   });
-  const selectedCategory = form.watch("category");
 
   const incomeSourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), orderBy('transactionName')).withConverter(incomeSourceConverter) : null, [authUser]);
   const [incomeSources, loadingSources, errorSources] = useCollectionData(incomeSourcesQuery);
@@ -111,9 +97,6 @@ export default function IncomePage() {
   const accountsQuery = useMemo(() => authUser ? query(collection(db, 'accounts'), where('type', '==', 'Income'), orderBy('name')).withConverter(accountConverter) : null, [authUser]);
   const [incomeAccounts, loadingAccounts, errorAccounts] = useCollectionData(accountsQuery);
   
-  const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
-  const [members, loadingMembers, errorMembers] = useCollectionData(membersQuery);
-
   const realizedAmounts = useMemo(() => {
     if (!incomeRecords) return {};
     const yearStart = new Date(selectedYear, 0, 1);
@@ -134,15 +117,10 @@ export default function IncomePage() {
     }
     setIsSubmitting(true);
     try {
-        if (data.category === 'Tithe') {
-            await addTitheTransaction({ ...data, date: new Date() }, authUser.uid, authUser.email);
-            toast({ title: "Success", description: "Tithe record saved successfully." });
-        } else {
-            const budgetForYear = { [selectedYear]: data.amount || 0 };
-            await addIncomeSource({ ...data, category: data.category as IncomeCategory }, budgetForYear, authUser.uid, authUser.email);
-            toast({ title: "Success", description: "Income source created successfully." });
-        }
-        form.reset({ code: "", transactionName: "", category: undefined, amount: 0, description: "", memberName: "", accountId: "" });
+        const budgetForYear = { [selectedYear]: data.amount || 0 };
+        await addIncomeSource({ ...data, category: data.category as IncomeCategory }, budgetForYear, authUser.uid, authUser.email);
+        toast({ title: "Success", description: "Income source created successfully." });
+        form.reset({ code: "", transactionName: "", category: undefined, amount: 0, description: "", accountId: "" });
     } catch (err) {
       console.error(err);
       toast({ variant: "destructive", title: "Error", description: "Failed to save record." });
@@ -158,7 +136,6 @@ export default function IncomePage() {
   
   const handleOpenBudgetDialog = (source: IncomeSource) => {
     setEditingSource(source);
-    // "Smart Upgrade" read logic: check new budgets map first, then fall back to old budget field if year is 2025
     const budgetForSelectedYear = source.budgets?.[selectedYear] || (selectedYear === 2025 ? source.budget : 0) || 0;
     budgetForm.reset({ budget: budgetForSelectedYear });
     setIsBudgetDialogOpen(true);
@@ -170,7 +147,7 @@ export default function IncomePage() {
       throw new Error("User not authenticated");
     }
     try {
-      const { amount, memberName, ...coreData } = updatedData;
+      const { amount, ...coreData } = updatedData;
       await updateIncomeSource(sourceId, coreData, authUser.uid, authUser.email);
       toast({ title: "Income Source Updated", description: `${updatedData.transactionName} has been updated.`});
     } catch (err) {
@@ -184,15 +161,12 @@ export default function IncomePage() {
     if (!authUser || !editingSource) return;
     setIsSubmitting(true);
     try {
-        // "Smart Upgrade" write logic
         const currentBudgets = editingSource.budgets || {};
-        // If the new budget map doesn't exist but the old field does, migrate it
         if (!editingSource.budgets && editingSource.budget) {
-            currentBudgets[2025] = editingSource.budget; // Assume old budget was for 2025
+            currentBudgets[2025] = editingSource.budget;
         }
         const updatedBudgets = { ...currentBudgets, [selectedYear]: data.budget };
         
-        // Save the new budgets map and nullify the old field to complete migration
         await updateIncomeSource(editingSource.id, { budgets: updatedBudgets, budget: null }, authUser.uid, authUser.email);
 
         toast({ title: "Success", description: `Budget for ${selectedYear} set successfully.` });
@@ -223,8 +197,8 @@ export default function IncomePage() {
     return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
   };
 
-  const isLoading = authLoading || loadingSources || loadingAccounts || loadingMembers || loadingRecords;
-  const dataError = errorSources || errorAccounts || errorMembers || errorRecords;
+  const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords;
+  const dataError = errorSources || errorAccounts || errorRecords;
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
 
@@ -232,20 +206,20 @@ export default function IncomePage() {
     <div className="space-y-6 md:space-y-8">
       <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center">
         <DollarSign className="mr-3 h-8 w-8 text-primary" />
-        Record Income
+        Income Management
       </h1>
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle>Add New Income Record</CardTitle>
-          <CardDescription>Create a budgeted income source (e.g., Offerings) or record a direct transaction (e.g., Tithe) for the year {selectedYear}.</CardDescription>
+          <CardTitle>Add Budgeted Income Source</CardTitle>
+          <CardDescription>Define an income category (e.g., Sunday Offerings, Tithes) and set its budget for {selectedYear}.</CardDescription>
         </CardHeader>
         <CardContent>
           {!authUser && (
             <Alert variant="destructive" className="mb-4">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle>Authentication Required</AlertTitle>
-              <AlertDescription>Please log in to add or view income records.</AlertDescription>
+              <AlertDescription>Please log in to manage income sources.</AlertDescription>
             </Alert>
           )}
           {authUser && (
@@ -266,16 +240,16 @@ export default function IncomePage() {
                         <FormMessage /></FormItem>
                     )}/>
                     <FormField control={form.control} name="code" render={({ field }) => (
-                        <FormItem><FormLabel>Code</FormLabel><FormControl><Input placeholder="e.g., 1001" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                        <FormItem><FormLabel>Source Code</FormLabel><FormControl><Input placeholder="e.g., 1001" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
                     )}/>
                     <FormField control={form.control} name="transactionName" render={({ field }) => (
-                        <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g., Sunday Offering" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
+                        <FormItem><FormLabel>Source Name</FormLabel><FormControl><Input placeholder="e.g., Sunday Offering" {...field} disabled={isSubmitting}/></FormControl><FormMessage /></FormItem>
                     )}/>
                 </div>
                 
                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                     <FormField control={form.control} name="accountId" render={({ field }) => (
-                        <FormItem><FormLabel>Account</FormLabel>
+                        <FormItem><FormLabel>Finance Account</FormLabel>
                             <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting || loadingAccounts}>
                             <FormControl><SelectTrigger><SelectValue placeholder={loadingAccounts ? "Loading accounts..." : "Select an income account"} /></SelectTrigger></FormControl>
                             <SelectContent>{incomeAccounts?.map(acc => <SelectItem key={acc.id} value={acc.id}>{acc.code} - {acc.name}</SelectItem>)}</SelectContent>
@@ -283,33 +257,23 @@ export default function IncomePage() {
                         <FormMessage /></FormItem>
                     )}/>
                     <FormField control={form.control} name="amount" render={({ field }) => (
-                        <FormItem><FormLabel>{selectedCategory === 'Tithe' ? 'Amount (XAF)' : `Initial Budget for ${selectedYear} (XAF)`}</FormLabel>
+                        <FormItem><FormLabel>Initial Budget for {selectedYear} (XAF)</FormLabel>
                             <FormControl><Input type="number" placeholder="0" {...field} step="0.01" disabled={isSubmitting}/></FormControl>
                         <FormMessage /></FormItem>
                     )}/>
-                    {selectedCategory === "Tithe" && (
-                        <FormField control={form.control} name="memberName" render={({ field }) => (
-                            <FormItem><FormLabel>Member Name</FormLabel>
-                                <Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting || loadingMembers}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} /></SelectTrigger></FormControl>
-                                    <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
-                                </Select>
-                            <FormMessage /></FormItem>
-                        )}/>
-                    )}
                 </div>
                 
                 <div className="grid grid-cols-1">
                     <FormField control={form.control} name="description" render={({ field }) => (
                         <FormItem><FormLabel>Description (Optional)</FormLabel>
-                            <FormControl><Textarea placeholder="E.g., Special offering for youth ministry" {...field} disabled={isSubmitting}/></FormControl>
+                            <FormControl><Textarea placeholder="E.g., Yearly budget for all member tithes." {...field} disabled={isSubmitting}/></FormControl>
                         <FormMessage /></FormItem>
                     )}/>
                 </div>
 
-                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting || !authUser || !selectedCategory}>
+                <Button type="submit" className="w-full sm:w-auto" disabled={isSubmitting || !authUser}>
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlusCircle className="mr-2 h-4 w-4" />}
-                   {selectedCategory === 'Tithe' ? 'Save Tithe' : 'Create Income Source'}
+                   Create Income Source
                 </Button>
               </form>
             </Form>
@@ -322,7 +286,7 @@ export default function IncomePage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle>Budgeted Income Sources</CardTitle>
-              <CardDescription>Manage recurring income sources and their yearly budgets.</CardDescription>
+              <CardDescription>Click a source to record transactions. All categories including Tithes are managed here.</CardDescription>
             </div>
             <div className="flex items-center gap-2 self-start sm:self-center">
                  <Label htmlFor="year-select">Year:</Label>
@@ -343,7 +307,7 @@ export default function IncomePage() {
              <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error Loading Records</AlertTitle><AlertDescription>{dataError.message}</AlertDescription></Alert>
           )}
           {!isLoading && !dataError && authUser && (!incomeSources || incomeSources.length === 0) && (
-            <p className="text-center text-muted-foreground py-10">No income records yet. Add one above!</p>
+            <p className="text-center text-muted-foreground py-10">No income sources created yet. Add one above!</p>
           )}
           {!isLoading && !dataError && authUser && (incomeSources?.length > 0) && (
             <div className="overflow-x-auto">
@@ -351,7 +315,7 @@ export default function IncomePage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Code</TableHead>
-                    <TableHead>Name</TableHead>
+                    <TableHead>Source Name</TableHead>
                     <TableHead>Account</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Budget ({selectedYear})</TableHead>
@@ -361,9 +325,8 @@ export default function IncomePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {incomeSources?.filter(s => s.category !== 'Tithe').map((source) => {
+                  {incomeSources?.map((source) => {
                       const account = incomeAccounts?.find(a => a.id === source.accountId);
-                      // "Smart Upgrade" read logic
                       const budget = source.budgets?.[selectedYear] ?? (selectedYear === 2025 ? source.budget : 0) ?? 0;
                       const realized = realizedAmounts[source.id] || 0;
                       const percentage = budget > 0 ? (realized / budget) * 100 : 0;
@@ -446,10 +409,9 @@ const EditIncomeSourceForm: React.FC<EditIncomeSourceFormProps> = ({ source, onS
                 code: source.code,
                 transactionName: source.transactionName,
                 category: source.category,
-                amount: 0, // This is for validation, not display.
+                amount: 0, // Not saved directly here
                 accountId: source.accountId || "",
                 description: source.description || "",
-                memberName: "", // Not applicable for sources
             });
         }
     }, [source, editForm]);

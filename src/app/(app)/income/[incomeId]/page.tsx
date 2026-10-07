@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
+import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues, Member, MemberFirestore } from '@/types';
 import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -23,11 +23,12 @@ import { CalendarIcon } from 'lucide-react';
 import { format, startOfYear, endOfYear } from 'date-fns';
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from 'zod';
+import { incomeSchema } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '@/lib/firebase';
 import { addIncomeTransaction, updateIncomeTransaction, deleteIncomeTransaction } from '@/services/incomeTransactionService';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const incomeSourceConverter = {
     fromFirestore: (snapshot: any): IncomeSource => {
@@ -53,14 +54,17 @@ const incomeTransactionConverter = {
     toFirestore: (record: IncomeRecord) => record,
 }
 
-const transactionSchema = z.object({
-  code: z.string().min(1, "Transaction code is required."),
-  transactionName: z.string().min(1, "Transaction name is required."),
-  amount: z.coerce.number().positive("Amount must be positive."),
-  date: z.date({ required_error: "Date is required." }),
-  description: z.string().optional(),
-});
-type TransactionFormValues = z.infer<typeof transactionSchema>;
+const memberConverter = {
+    fromFirestore: (snapshot: any): Member => {
+        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        };
+    },
+    toFirestore: (member: Member) => member,
+};
 
 export default function IncomeSourceDetailsPage() {
     const router = useRouter();
@@ -74,20 +78,33 @@ export default function IncomeSourceDetailsPage() {
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<IncomeRecord | null>(null);
 
-    const form = useForm<TransactionFormValues>({
-        resolver: zodResolver(transactionSchema),
+    const [source, loadingSource, errorSource] = useDocumentData(
+        incomeId ? doc(db, 'income_sources', incomeId).withConverter(incomeSourceConverter) : null
+    );
+
+    const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
+    const [members, loadingMembers] = useCollectionData(membersQuery);
+
+    const form = useForm<IncomeFormValues>({
+        resolver: zodResolver(incomeSchema),
         defaultValues: {
             code: "",
             transactionName: "",
             date: new Date(),
             amount: 0,
             description: "",
+            category: "Offering",
+            accountId: "",
+            memberName: "",
         },
     });
 
-    const [source, loadingSource, errorSource] = useDocumentData(
-        incomeId ? doc(db, 'income_sources', incomeId).withConverter(incomeSourceConverter) : null
-    );
+    React.useEffect(() => {
+        if (source) {
+            form.setValue('category', source.category);
+            form.setValue('accountId', source.accountId || '');
+        }
+    }, [source, form]);
 
     const yearStart = startOfYear(new Date(year, 0, 1));
     const yearEnd = endOfYear(new Date(year, 11, 31));
@@ -107,25 +124,28 @@ export default function IncomeSourceDetailsPage() {
         return transactions?.reduce((sum, tx) => sum + tx.amount, 0) || 0;
     }, [transactions]);
 
-    const onSubmit = async (data: TransactionFormValues) => {
+    const onSubmit = async (data: IncomeFormValues) => {
         if (!authUser || !source) return;
         
-        const transactionData: IncomeFormValues = {
-            ...data,
-            category: source.category,
-            accountId: source.accountId || '',
-        };
-
         try {
             if (editingTransaction) {
-                await updateIncomeTransaction(editingTransaction.id, transactionData, authUser.uid, authUser.email);
+                await updateIncomeTransaction(editingTransaction.id, data, authUser.uid, authUser.email);
                 toast({ title: "Success", description: "Transaction updated." });
                 setIsEditDialogOpen(false);
             } else {
-                await addIncomeTransaction(transactionData, incomeId, authUser.uid, authUser.email);
+                await addIncomeTransaction(data, incomeId, authUser.uid, authUser.email);
                 toast({ title: "Success", description: "Transaction recorded." });
             }
-            form.reset({ code: "", transactionName: "", date: new Date(), amount: 0, description: "" });
+            form.reset({ 
+                code: "", 
+                transactionName: "", 
+                date: new Date(), 
+                amount: 0, 
+                description: "", 
+                category: source.category, 
+                accountId: source.accountId || '',
+                memberName: ""
+            });
             setEditingTransaction(null);
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to save transaction." });
@@ -150,6 +170,9 @@ export default function IncomeSourceDetailsPage() {
             date: transaction.date,
             amount: transaction.amount,
             description: transaction.description || "",
+            category: transaction.category,
+            accountId: transaction.accountId || "",
+            memberName: transaction.memberName || "",
         });
         setIsEditDialogOpen(true);
     };
@@ -158,7 +181,7 @@ export default function IncomeSourceDetailsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const isLoading = loadingSource || loadingTransactions || authLoading;
+    const isLoading = loadingSource || loadingTransactions || authLoading || loadingMembers;
     const error = errorSource || errorTransactions;
 
     if (isLoading) {
@@ -239,13 +262,23 @@ export default function IncomeSourceDetailsPage() {
                                     <FormItem><FormLabel>Transaction Code</FormLabel><FormControl><Input placeholder="e.g. 101-01" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
                                 <FormField control={form.control} name="transactionName" render={({ field }) => (
-                                    <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. First service collection" {...field} /></FormControl><FormMessage /></FormItem>
+                                    <FormItem><FormLabel>Name/Purpose</FormLabel><FormControl><Input placeholder="e.g. Sunday Collection" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
+                                {source.category === 'Tithe' && (
+                                    <FormField control={form.control} name="memberName" render={({ field }) => (
+                                        <FormItem><FormLabel>Member Name</FormLabel>
+                                            <Select onValueChange={field.onChange} value={field.value || ""}>
+                                                <FormControl><SelectTrigger><SelectValue placeholder="Select a member" /></SelectTrigger></FormControl>
+                                                <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
+                                            </Select>
+                                        <FormMessage /></FormItem>
+                                    )}/>
+                                )}
                                 <FormField control={form.control} name="amount" render={({ field }) => (
                                     <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
                                 <FormField control={form.control} name="description" render={({ field }) => (
-                                    <FormItem><FormLabel>Description</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
+                                    <FormItem><FormLabel>Description (Optional)</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
                                 <Button type="submit" disabled={form.formState.isSubmitting}><PlusCircle className="mr-2 h-4 w-4" /> Add Transaction</Button>
                             </form>
@@ -257,13 +290,12 @@ export default function IncomeSourceDetailsPage() {
                     <CardContent>
                         {loadingTransactions ? <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
                         : transactions && transactions.length > 0 ? (
-                            <div className="overflow-x-auto max-h-[400px]">
+                            <div className="overflow-x-auto max-h-[500px]">
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Date</TableHead>
-                                            <TableHead>Code</TableHead>
-                                            <TableHead>Name</TableHead>
+                                            <TableHead>Member / Details</TableHead>
                                             <TableHead className="text-right">Amount</TableHead>
                                             <TableHead className="text-right">Actions</TableHead>
                                         </TableRow>
@@ -272,9 +304,13 @@ export default function IncomeSourceDetailsPage() {
                                         {transactions.map(tx => (
                                             <TableRow key={tx.id}>
                                                 <TableCell>{format(tx.date, "PP")}</TableCell>
-                                                <TableCell>{tx.code}</TableCell>
-                                                <TableCell>{tx.transactionName}</TableCell>
-                                                <TableCell className="text-right">{formatCurrency(tx.amount)}</TableCell>
+                                                <TableCell>
+                                                    <div className="flex flex-col">
+                                                        <span className="font-medium">{tx.transactionName}</span>
+                                                        {tx.memberName && <span className="text-xs text-muted-foreground">{tx.memberName}</span>}
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell className="text-right font-medium">{formatCurrency(tx.amount)}</TableCell>
                                                 <TableCell className="text-right space-x-1">
                                                     <Button variant="ghost" size="icon" onClick={() => openEditDialog(tx)}><Edit className="h-4 w-4" /></Button>
                                                     <AlertDialog>
@@ -306,14 +342,13 @@ export default function IncomeSourceDetailsPage() {
             </div>
             
             <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
-                <DialogContent>
+                <DialogContent className="max-w-lg">
                     <DialogHeader>
-                        <DialogTitle>Edit Transaction</DialogTitle>
-                        <DialogDescription>Update the details for this income transaction.</DialogDescription>
+                        <DialogTitle>Edit Income Transaction</DialogTitle>
+                        <DialogDescription>Update the details for this transaction.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
-                            {/* The form fields are the same as the add form */}
                             <FormField control={form.control} name="date" render={({ field }) => (
                                 <FormItem className="flex flex-col"><FormLabel>Date</FormLabel>
                                     <Popover>
@@ -330,6 +365,16 @@ export default function IncomeSourceDetailsPage() {
                             <FormField control={form.control} name="transactionName" render={({ field }) => (
                                 <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
                             )}/>
+                             {source.category === 'Tithe' && (
+                                <FormField control={form.control} name="memberName" render={({ field }) => (
+                                    <FormItem><FormLabel>Member Name</FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value || ""}>
+                                            <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                                            <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    <FormMessage /></FormItem>
+                                )}/>
+                            )}
                             <FormField control={form.control} name="amount" render={({ field }) => (
                                 <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                             )}/>
@@ -351,7 +396,3 @@ export default function IncomeSourceDetailsPage() {
         </div>
     );
 }
-
-    
-
-    
