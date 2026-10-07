@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useMemo } from 'react';
@@ -98,7 +99,6 @@ export default function IncomeSourceDetailsPage() {
         },
     });
 
-    // Sync form with source properties
     React.useEffect(() => {
         if (source) {
             form.setValue('category', source.category);
@@ -131,12 +131,13 @@ export default function IncomeSourceDetailsPage() {
         if (!authUser || !source) return;
         
         try {
+            const finalData = { ...data, memberName: data.memberName === "none" ? "" : data.memberName };
             if (editingTransaction) {
-                await updateIncomeTransaction(editingTransaction.id, data, authUser.uid, authUser.email);
+                await updateIncomeTransaction(editingTransaction.id, finalData, authUser.uid, authUser.email);
                 toast({ title: "Success", description: "Transaction updated." });
                 setIsEditDialogOpen(false);
             } else {
-                await addIncomeTransaction(data, incomeId, authUser.uid, authUser.email);
+                await addIncomeTransaction(finalData, incomeId, authUser.uid, authUser.email);
                 toast({ title: "Success", description: "Transaction recorded." });
             }
             form.reset({ 
@@ -175,7 +176,7 @@ export default function IncomeSourceDetailsPage() {
             description: transaction.description || "",
             category: transaction.category,
             accountId: transaction.accountId || "",
-            memberName: transaction.memberName || "",
+            memberName: transaction.memberName || "none",
         });
         setIsEditDialogOpen(true);
     };
@@ -269,14 +270,15 @@ export default function IncomeSourceDetailsPage() {
                                 )}/>
                                 
                                 <FormField control={form.control} name="memberName" render={({ field }) => (
-                                    <FormItem><FormLabel>Member (Optional for non-Tithes)</FormLabel>
-                                        <Select onValueChange={field.onChange} value={field.value || ""}>
-                                            <FormControl><SelectTrigger><SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} /></SelectTrigger></FormControl>
+                                    <FormItem><FormLabel>Attributed Member (Optional)</FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value || "none"}>
+                                            <FormControl><SelectTrigger><SelectValue placeholder="Select a member" /></SelectTrigger></FormControl>
                                             <SelectContent>
-                                                <SelectItem value=" ">None</SelectItem>
+                                                <SelectItem value="none">None / General</SelectItem>
                                                 {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
                                             </SelectContent>
                                         </Select>
+                                        <FormDescription>Attribute this income to a specific member list.</FormDescription>
                                     <FormMessage /></FormItem>
                                 )}/>
 
@@ -330,7 +332,7 @@ export default function IncomeSourceDetailsPage() {
                                                         <AlertDialogContent>
                                                             <AlertDialogHeader>
                                                                 <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                                                <AlertDialogDescription>This will permanently delete the transaction "{tx.transactionName}".</AlertDialogDescription>
+                                                                <AlertDialogDescription>This will permanently delete this transaction.</AlertDialogDescription>
                                                             </AlertDialogHeader>
                                                             <AlertDialogFooter>
                                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -377,11 +379,11 @@ export default function IncomeSourceDetailsPage() {
                             )}/>
                             
                             <FormField control={form.control} name="memberName" render={({ field }) => (
-                                <FormItem><FormLabel>Member</FormLabel>
-                                    <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                                <FormItem><FormLabel>Attributed Member</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value || "none"}>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select member" /></SelectTrigger></FormControl>
                                         <SelectContent>
-                                            <SelectItem value=" ">None</SelectItem>
+                                            <SelectItem value="none">None / General</SelectItem>
                                             {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
