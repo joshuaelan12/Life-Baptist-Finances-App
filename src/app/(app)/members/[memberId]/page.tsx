@@ -1,12 +1,11 @@
-
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
+import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues, IncomeSource, IncomeSourceFirestore } from '@/types';
 import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins, Edit, Trash2, CalendarIcon, PlusCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -22,11 +21,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { incomeSchema } from '@/types';
 import { useToast } from "@/hooks/use-toast";
-import { updateIncomeTransaction, deleteIncomeTransaction } from '@/services/incomeTransactionService';
+import { updateIncomeTransaction, deleteIncomeTransaction, addIncomeTransaction } from '@/services/incomeTransactionService';
 
 const memberConverter = {
     fromFirestore: (snapshot: any): Member => {
@@ -51,6 +51,18 @@ const incomeConverter = {
     }
   };
 
+const incomeSourceConverter = {
+    fromFirestore: (snapshot: any): IncomeSource => {
+        const data = snapshot.data();
+        return {
+            id: snapshot.id,
+            ...data,
+            createdAt: (data.createdAt as Timestamp)?.toDate(),
+        } as IncomeSource;
+    },
+    toFirestore: (source: IncomeSource) => source,
+};
+
 export default function MemberTitheDetailsPage() {
     const router = useRouter();
     const params = useParams();
@@ -59,10 +71,15 @@ export default function MemberTitheDetailsPage() {
     
     const [authUser, authLoading, authError] = useAuthState(auth);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<IncomeRecord | null>(null);
 
     const memberRef = useMemo(() => memberId ? doc(db, 'members', memberId).withConverter(memberConverter) : null, [memberId]);
     const [member, loadingMember, errorMember] = useDocumentData(memberRef);
+
+    // Fetch tithe-category income sources to link records correctly
+    const sourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), where('category', '==', 'Tithe')) : null, [authUser]);
+    const [titheSources, loadingSources] = useCollectionData(sourcesQuery?.withConverter(incomeSourceConverter));
 
     const titheQuery = useMemo(() => 
         member ? query(
@@ -85,9 +102,21 @@ export default function MemberTitheDetailsPage() {
             description: "",
             category: "Tithe",
             accountId: "",
-            memberName: member?.fullName || "",
+            memberName: "",
         },
     });
+
+    // Update form when member or sources change
+    useEffect(() => {
+        if (member) {
+            form.setValue('memberName', member.fullName);
+            form.setValue('transactionName', `Tithe - ${member.fullName}`);
+        }
+        if (titheSources && titheSources.length > 0) {
+            const firstSource = titheSources[0];
+            form.setValue('accountId', firstSource.accountId || '');
+        }
+    }, [member, titheSources, form]);
 
     const totalTithes = useMemo(() => {
         return titheRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
@@ -102,6 +131,34 @@ export default function MemberTitheDetailsPage() {
             setEditingTransaction(null);
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to update record." });
+        }
+    };
+
+    const handleAdd = async (data: IncomeFormValues) => {
+        if (!authUser || !member) return;
+        
+        const selectedSource = titheSources?.find(s => s.accountId === data.accountId);
+        if (!selectedSource) {
+            toast({ variant: "destructive", title: "Config Error", description: "Please select a valid income source for this tithe." });
+            return;
+        }
+
+        try {
+            await addIncomeTransaction(data, selectedSource.id, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Tithe recorded successfully." });
+            setIsAddDialogOpen(false);
+            form.reset({
+                code: "",
+                transactionName: `Tithe - ${member.fullName}`,
+                date: new Date(),
+                amount: 0,
+                description: "",
+                category: "Tithe",
+                accountId: selectedSource.accountId || '',
+                memberName: member.fullName,
+            });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record tithe." });
         }
     };
 
@@ -134,26 +191,47 @@ export default function MemberTitheDetailsPage() {
         return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
-    const isLoading = loadingMember || loadingTithes || authLoading;
+    const isLoading = loadingMember || loadingTithes || authLoading || loadingSources;
     const error = errorMember || errorTithes || authError;
 
     if (isLoading) {
-        return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
+        return (
+            <div className="flex justify-center items-center h-screen">
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            </div>
+        );
     }
 
     if (error) {
-        return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
+        return (
+            <Alert variant="destructive" className="m-6">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error.message}</AlertDescription>
+            </Alert>
+        );
     }
     
     if (!member) {
-        return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Found</AlertTitle><AlertDescription>The requested member could not be found.</AlertDescription></Alert>;
+        return (
+            <Alert variant="destructive" className="m-6">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Not Found</AlertTitle>
+                <AlertDescription>The requested member could not be found.</AlertDescription>
+            </Alert>
+        );
     }
 
     return (
         <div className="space-y-6">
-            <Button variant="outline" onClick={() => router.back()} className="mb-4">
-                <ArrowLeft className="mr-2 h-4 w-4" /> Back to Members
-            </Button>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <Button variant="outline" onClick={() => router.back()}>
+                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Members
+                </Button>
+                <Button onClick={() => setIsAddDialogOpen(true)}>
+                    <PlusCircle className="mr-2 h-4 w-4" /> Add Tithe Record
+                </Button>
+            </div>
 
             <Card>
                 <CardHeader>
@@ -180,9 +258,9 @@ export default function MemberTitheDetailsPage() {
                     <CardDescription>List of individual tithe payments.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    {loadingTithes ? (
-                         <div className="flex justify-center items-center py-10"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
-                    ) : titheRecords && titheRecords.length > 0 ? (
+                    {!titheRecords || titheRecords.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-10">No tithe records found for this member.</p>
+                    ) : (
                         <div className="overflow-x-auto">
                             <Table>
                                 <TableHeader>
@@ -226,12 +304,68 @@ export default function MemberTitheDetailsPage() {
                                 </TableBody>
                             </Table>
                         </div>
-                    ) : (
-                        <p className="text-center text-muted-foreground py-10">No tithe records found for this member.</p>
                     )}
                 </CardContent>
             </Card>
 
+            {/* Add Tithe Dialog */}
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Record Tithe for {member.fullName}</DialogTitle>
+                        <DialogDescription>Enter the details for a tithe payment. You can select past months if needed.</DialogDescription>
+                    </DialogHeader>
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(handleAdd)} className="space-y-4 py-4">
+                            <FormField control={form.control} name="date" render={({ field }) => (
+                                <FormItem className="flex flex-col"><FormLabel>Payment Date</FormLabel>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <FormControl>
+                                                <Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >
+                                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                </Button>
+                                            </FormControl>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                                        </PopoverContent>
+                                    </Popover>
+                                <FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="accountId" render={({ field }) => (
+                                <FormItem><FormLabel>Tithe Fund Source</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select tithe category fund" /></SelectTrigger></FormControl>
+                                        <SelectContent>
+                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.accountId || ''}>{s.transactionName}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                <FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="code" render={({ field }) => (
+                                <FormItem><FormLabel>Receipt/Transaction Code</FormLabel><FormControl><Input placeholder="e.g., T-2024-001" {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="amount" render={({ field }) => (
+                                <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="description" render={({ field }) => (
+                                <FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <DialogFooter>
+                                <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                                <Button type="submit" disabled={form.formState.isSubmitting}>
+                                    {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                                    Record Tithe
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Tithe Dialog */}
             <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
@@ -244,9 +378,16 @@ export default function MemberTitheDetailsPage() {
                                 <FormItem className="flex flex-col"><FormLabel>Date</FormLabel>
                                     <Popover>
                                         <PopoverTrigger asChild>
-                                            <FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
+                                            <FormControl>
+                                                <Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >
+                                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                                </Button>
+                                            </FormControl>
                                         </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
+                                        <PopoverContent className="w-auto p-0" align="start">
+                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                                        </PopoverContent>
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
