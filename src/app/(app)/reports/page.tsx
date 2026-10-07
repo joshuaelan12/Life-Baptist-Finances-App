@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search, ListFilter } from "lucide-react";
-import { format, startOfMonth, endOfMonth, subMonths, startOfYear } from "date-fns";
+import { format, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
@@ -153,6 +153,13 @@ export default function ReportsPage() {
       periodString = "for All Time";
     }
 
+    // Calculate Balance Brought Forward (based on Dashboard logic: prior year performance)
+    const bfYearStart = startOfYear(new Date(budgetYear - 1, 0, 1));
+    const bfYearEnd = endOfYear(new Date(budgetYear - 1, 11, 31));
+    const bfIncome = (incomeRecords || []).filter(r => r.date >= bfYearStart && r.date <= bfYearEnd).reduce((sum, r) => sum + r.amount, 0);
+    const bfExpense = (expenseRecords || []).filter(r => r.date >= bfYearStart && r.date <= bfYearEnd).reduce((sum, r) => sum + r.amount, 0);
+    const balanceBroughtForward = bfIncome - bfExpense;
+
     try {
       let rawData: any[] = [];
       let reportTitle = "";
@@ -167,6 +174,7 @@ export default function ReportsPage() {
           expenseSources: expenseSources || [],
           startDate,
           endDate,
+          balanceBroughtForward
       };
 
       switch (reportType) {
@@ -203,9 +211,10 @@ export default function ReportsPage() {
            const totalIncome = filteredIncome.reduce((sum, r) => sum + r.amount, 0);
            const totalExpenses = filteredExpenses.reduce((sum, r) => sum + r.amount, 0);
            rawData = [
-             { Category: 'Total Income', Amount: totalIncome },
-             { Category: 'Total Expenses', Amount: totalExpenses },
-             { Category: 'Net Balance', Amount: totalIncome - totalExpenses },
+             { Category: 'Balance Brought Forward', Amount: balanceBroughtForward },
+             { Category: 'Total Income (Period)', Amount: totalIncome },
+             { Category: 'Total Expenses (Period)', Amount: totalExpenses },
+             { Category: 'Available Balance', Amount: balanceBroughtForward + totalIncome - totalExpenses },
            ];
           break;
         case 'budget_vs_actuals':
@@ -262,7 +271,7 @@ export default function ReportsPage() {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
   if (authError) {
-    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Authentication Error</AlertTitle><AlertDescription>{authError.message}</AlertDescription></Alert>;
+    return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{authError.message}</AlertDescription></Alert>;
   }
   if (!authUser) {
     return <Alert variant="destructive"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Authenticated</AlertTitle><AlertDescription>Please log in to generate reports.</AlertDescription></Alert>;

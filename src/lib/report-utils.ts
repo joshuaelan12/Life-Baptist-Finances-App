@@ -26,6 +26,7 @@ interface ReportOptions {
     startDate?: Date;
     endDate?: Date;
     typeFilter?: AccountType[]; 
+    balanceBroughtForward?: number;
 }
 
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
@@ -35,8 +36,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
     const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
     const accounts = data as Account[];
-    const accountsMap = new Map(accounts.map(acc => [acc.id, acc]));
-    const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate } = options;
+    const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate, balanceBroughtForward = 0 } = options;
 
     const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
         if (!startDate || !endDate) return records;
@@ -47,7 +47,7 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
     const filteredExpenseRecords = filterByDate(expenseRecords);
 
     let grandBudgetTotal = 0;
-    let grandRealizedTotal = 0;
+    let grandRealizedTotal = balanceBroughtForward; // Start with B/F
 
     // Track which records have been "claimed" by an account to identify unassigned ones
     const claimedIncomeIds = new Set<string>();
@@ -58,8 +58,13 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
         if (relevantAccounts.length > 0) {
             csvData.push([type.toUpperCase()]); 
             
+            // Add B/F at the start of Income section if applicable
+            if (type === 'Income' && balanceBroughtForward !== 0) {
+                csvData.push(['Adjustment', '', `Balance Brought Forward (from ${budgetYear - 1})`, 'Historical', 0, balanceBroughtForward, 'N/A']);
+            }
+
             let typeBudgetTotal = 0;
-            let typeRealizedTotal = 0;
+            let typeRealizedTotal = (type === 'Income') ? balanceBroughtForward : 0;
 
             relevantAccounts.forEach((account: Account) => {
                 const accountBudget = account.budgets?.[budgetYear] || 0;
@@ -73,7 +78,6 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                 directIncomeRecords.forEach(r => claimedIncomeIds.add(r.id));
                 directExpenseRecords.forEach(r => claimedExpenseIds.add(r.id));
 
-                // Calculate sub-sources logic
                 let realizedFromSources = 0;
                 const sources = type === 'Income' ? relevantIncomeSources : relevantExpenseSources;
                 sources.forEach(source => {
@@ -84,11 +88,9 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
                     realizedFromSources += records.reduce((s, r) => s + r.amount, 0);
                 });
 
-                // Calculate direct records not caught by source filter
                 const directIncomeAmount = directIncomeRecords.filter(r => !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
                 const directExpenseAmount = directExpenseRecords.filter(r => !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
 
-                // FIX: For expenses, we sum them as positive "actuals spent"
                 const accountRealized = realizedFromSources + (type === 'Income' ? directIncomeAmount : directExpenseAmount);
                 const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                 
@@ -136,33 +138,21 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => 
 
             if (type === 'Income') {
                 grandBudgetTotal += typeBudgetTotal;
-                grandRealizedTotal += typeRealizedTotal;
+                // Realized total already includes B/F from typeRealizedTotal init
+                // We add current period net to grandRealizedTotal at the end instead to avoid double counting
             } else if (type === 'Expense') {
                 grandBudgetTotal -= typeBudgetTotal;
-                grandRealizedTotal -= typeRealizedTotal;
             }
         }
     });
 
-    // Handle Unassigned (The Dashboard "Catch-all")
-    const unassignedIncome = filteredIncomeRecords.filter(r => !claimedIncomeIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
-    const unassignedExpense = filteredExpenseRecords.filter(r => !claimedExpenseIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
+    // Re-calculate grand total properly for Available Balance
+    const totalIncome = filteredIncomeRecords.reduce((sum, r) => sum + r.amount, 0);
+    const totalExpense = filteredExpenseRecords.reduce((sum, r) => sum + r.amount, 0);
+    grandRealizedTotal = balanceBroughtForward + totalIncome - totalExpense;
 
-    if (unassignedIncome > 0 || unassignedExpense > 0) {
-        csvData.push(['UNASSIGNED TRANSACTIONS (NOT IN CHART OF ACCOUNTS)']);
-        if (unassignedIncome > 0) {
-            csvData.push(['Income', '', 'General/Unlinked Income', 'Other', 0, unassignedIncome, 'N/A']);
-            grandRealizedTotal += unassignedIncome;
-        }
-        if (unassignedExpense > 0) {
-            csvData.push(['Expense', '', 'General/Unlinked Expenses', 'Other', 0, unassignedExpense, 'N/A']);
-            grandRealizedTotal -= unassignedExpense;
-        }
-        csvData.push([]);
-    }
-
-    csvData.push(['GRAND SUMMARY: NET POSITION']);
-    csvData.push(['Net Position', '', '', '', grandBudgetTotal, grandRealizedTotal, '']);
+    csvData.push(['GRAND SUMMARY: AVAILABLE BALANCE']);
+    csvData.push(['Available Balance', '', '', '', grandBudgetTotal, grandRealizedTotal, '']);
 
     return csvData;
 };
@@ -192,10 +182,8 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
     if (data.length === 0) return { headers: [], rows: [], body: [] };
 
     let headers: string[][] = [];
-    let rows: any[][] = [];
     let body: any[] = [];
     let total: number | undefined = undefined;
-
 
     switch(reportType) {
         case 'income':
@@ -238,8 +226,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
         case 'balance_sheet':
              const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
              const accounts = data as Account[];
-             const accountsMap = new Map(accounts.map(acc => [acc.id, acc]));
-             const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear() } = options;
+             const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear(), balanceBroughtForward = 0 } = options;
 
              const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
                 if (!startDate || !endDate) return records;
@@ -249,22 +236,32 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
              const filteredIncomeRecords = filterByDate(incomeRecords);
              const filteredExpenseRecords = filterByDate(expenseRecords);
 
-             // Track claimed records to identify unassigned one
              const claimedIncomeIds = new Set<string>();
              const claimedExpenseIds = new Set<string>();
 
              headers.push(['A/C# / Name', 'Description / Category', `Budget for ${budgetYear}`, `Realized: ${options.periodString}`, '% Realized']);
 
              let grandBudgetTotal = 0;
-             let grandRealizedTotal = 0;
+             let grandRealizedTotal = balanceBroughtForward;
 
              typeOrder.forEach(type => {
                  const groupedAccounts = accounts.filter(acc => acc.type === type);
                  if (groupedAccounts.length > 0) {
                      body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'center' } }]);
                      
+                     // Inject Balance Brought Forward at the start of Income section
+                     if (type === 'Income' && balanceBroughtForward !== 0) {
+                         body.push([
+                             { content: `Adjustment: Balance Brought Forward (from ${budgetYear - 1})`, styles: { fontStyle: 'italic', fillColor: '#F0F0F0' } },
+                             { content: 'Historical', styles: { fillColor: '#F0F0F0' } },
+                             { content: formatCurrency(0), styles: { halign: 'right', fillColor: '#F0F0F0' } },
+                             { content: formatCurrency(balanceBroughtForward), styles: { halign: 'right', fontStyle: 'bold', fillColor: '#F0F0F0' } },
+                             { content: 'N/A', styles: { halign: 'right', fillColor: '#F0F0F0' } }
+                         ]);
+                     }
+
                      let typeBudgetTotal = 0;
-                     let typeRealizedTotal = 0;
+                     let typeRealizedTotal = (type === 'Income') ? balanceBroughtForward : 0;
 
                      groupedAccounts.forEach((account: Account) => {
                          const accountBudget = account.budgets?.[budgetYear] || 0;
@@ -290,7 +287,6 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          const directIncomeAmount = directIncomeRecords.filter(r => !r.incomeSourceId).reduce((sum, r) => sum + r.amount, 0);
                          const directExpenseAmount = directExpenseRecords.filter(r => !r.expenseSourceId).reduce((sum, r) => sum + r.amount, 0);
 
-                         // FIX: Both additions should be positive for spent/received "Actuals"
                          const accountRealized = realizedFromSources + (type === 'Income' ? directIncomeAmount : directExpenseAmount);
                          const accountPercentage = accountBudget > 0 ? (accountRealized / accountBudget) * 100 : 0;
                          
@@ -330,31 +326,20 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                          { content: `${typeBudgetTotal > 0 ? ((typeRealizedTotal / typeBudgetTotal) * 100).toFixed(1) : '0.0'}%`, styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } }
                      ]);
 
-                     if (type === 'Income') { grandBudgetTotal += typeBudgetTotal; grandRealizedTotal += typeRealizedTotal; }
-                     else if (type === 'Expense') { grandBudgetTotal -= typeBudgetTotal; grandRealizedTotal -= typeRealizedTotal; }
+                     if (type === 'Income') { grandBudgetTotal += typeBudgetTotal; }
+                     else if (type === 'Expense') { grandBudgetTotal -= typeBudgetTotal; }
                  }
              });
 
-             // Unassigned section for visual parity with Dashboard
-             const unassignedIncome = filteredIncomeRecords.filter(r => !claimedIncomeIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
-             const unassignedExpense = filteredExpenseRecords.filter(r => !claimedExpenseIds.has(r.id)).reduce((sum, r) => sum + r.amount, 0);
-
-             if (unassignedIncome > 0 || unassignedExpense > 0) {
-                 body.push([{ content: 'UNASSIGNED TRANSACTIONS (NOT IN CHART OF ACCOUNTS)', colSpan: 5, styles: { fontStyle: 'italic', fillColor: '#F0F0F0', halign: 'center', fontSize: 8 } }]);
-                 if (unassignedIncome > 0) {
-                    body.push([{ content: 'General/Unlinked Income', styles: { cellPadding: { left: 10 } } }, 'Other', formatCurrency(0), formatCurrency(unassignedIncome), 'N/A']);
-                    grandRealizedTotal += unassignedIncome;
-                 }
-                 if (unassignedExpense > 0) {
-                    body.push([{ content: 'General/Unlinked Expenses', styles: { cellPadding: { left: 10 } } }, 'Other', formatCurrency(0), formatCurrency(unassignedExpense), 'N/A']);
-                    grandRealizedTotal -= unassignedExpense;
-                 }
-             }
+             // Calculate Available Balance for the Summary
+             const totalIncomeActual = filteredIncomeRecords.reduce((sum, r) => sum + r.amount, 0);
+             const totalExpenseActual = filteredExpenseRecords.reduce((sum, r) => sum + r.amount, 0);
+             const availableBalance = balanceBroughtForward + totalIncomeActual - totalExpenseActual;
 
              body.push([
-                { content: 'GRAND SUMMARY: NET POSITION', colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
+                { content: 'SUMMARY: AVAILABLE BALANCE (NET POSITION)', colSpan: 2, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
                 { content: formatCurrency(grandBudgetTotal), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
-                { content: formatCurrency(grandRealizedTotal), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
+                { content: formatCurrency(availableBalance), styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'right' } },
                 { content: '', styles: { fillColor: '#346F4F' } }
              ]);
              break;
@@ -362,7 +347,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
         default:
             break;
     }
-    return { headers, rows, total, body };
+    return { headers, body, total };
 };
 
 
