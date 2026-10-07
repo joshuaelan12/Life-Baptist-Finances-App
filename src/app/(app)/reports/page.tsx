@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search } from "lucide-react";
+import { CalendarIcon, FileText, Download, Loader2, AlertTriangle, FileUp, Search, ListFilter } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, startOfYear } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { auth, db } from '@/lib/firebase';
@@ -24,6 +24,7 @@ import { downloadCsv, downloadPdf } from '@/lib/report-utils';
 
 type ReportType = "income" | "expenses" | "summary" | "budget_vs_actuals" | "balance_sheet";
 type PeriodType = "all" | "monthly" | "custom";
+type DetailLevel = "summary" | "detailed";
 
 const incomeConverter = {
   toFirestore(record: IncomeRecord): DocumentData { return record as DocumentData; },
@@ -91,6 +92,7 @@ export default function ReportsPage() {
 
   const [reportType, setReportType] = useState<ReportType>("budget_vs_actuals");
   const [periodType, setPeriodType] = useState<PeriodType>("monthly");
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>("detailed");
   const [selectedMonth, setSelectedMonth] = useState<Date>(new Date());
   const [selectedDateRange, setSelectedDateRange] = useState<DateRange | undefined>({ from: startOfMonth(new Date()), to: endOfMonth(new Date()) });
   const [budgetYear, setBudgetYear] = useState(new Date().getFullYear());
@@ -100,12 +102,11 @@ export default function ReportsPage() {
 
   const [titheMemberSearch, setTitheMemberSearch] = useState('');
 
-  const [incomeRecords, loadingIncome] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
-  const [expenseRecords, loadingExpenses] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
-  const [accounts, loadingAccounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
-  const [incomeSources, loadingIncomeSources] = useCollectionData(collection(db, 'income_sources').withConverter(incomeSourceConverter));
-  const [expenseSources, loadingExpenseSources] = useCollectionData(collection(db, 'expense_sources').withConverter(expenseSourceConverter));
-  const [members, loadingMembers] = useCollectionData(collection(db, 'members'));
+  const [incomeRecords] = useCollectionData(collection(db, 'income_records').withConverter(incomeConverter));
+  const [expenseRecords] = useCollectionData(collection(db, 'expense_records').withConverter(expenseConverter));
+  const [accounts] = useCollectionData(collection(db, 'accounts').withConverter(accountConverter));
+  const [incomeSources] = useCollectionData(collection(db, 'income_sources').withConverter(incomeSourceConverter));
+  const [expenseSources] = useCollectionData(collection(db, 'expense_sources').withConverter(expenseSourceConverter));
   
   const accountsMap = useMemo(() => {
     if (!accounts) return new Map<string, Account>();
@@ -155,8 +156,9 @@ export default function ReportsPage() {
     try {
       let rawData: any[] = [];
       let reportTitle = "";
+      let effectiveReportType: string = reportType;
 
-      const reportOptions = { 
+      const reportOptions: any = { 
           budgetYear, 
           periodString, 
           incomeRecords: incomeRecords || [], 
@@ -169,16 +171,30 @@ export default function ReportsPage() {
 
       switch (reportType) {
         case 'income':
-          reportTitle = `Income Report ${periodString}`;
-          rawData = (incomeRecords || [])
-            .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
-            .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
+          if (detailLevel === 'summary') {
+            reportTitle = `Income Summary Report ${periodString}`;
+            rawData = accounts || [];
+            effectiveReportType = 'budget_vs_actuals';
+            reportOptions.typeFilter = ['Income'];
+          } else {
+            reportTitle = `Detailed Income Report ${periodString}`;
+            rawData = (incomeRecords || [])
+              .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
+              .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
+          }
           break;
         case 'expenses':
-          reportTitle = `Expense Report ${periodString}`;
-          rawData = (expenseRecords || [])
-            .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
-            .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
+          if (detailLevel === 'summary') {
+            reportTitle = `Expense Summary Report ${periodString}`;
+            rawData = accounts || [];
+            effectiveReportType = 'budget_vs_actuals';
+            reportOptions.typeFilter = ['Expense'];
+          } else {
+            reportTitle = `Detailed Expense Report ${periodString}`;
+            rawData = (expenseRecords || [])
+              .filter(r => !startDate || (r.date >= startDate && r.date <= endDate!))
+              .map(r => ({ ...r, accountName: accountsMap.get(r.accountId || '')?.name || 'N/A' }));
+          }
           break;
         case 'summary':
            reportTitle = `Financial Summary ${periodString}`;
@@ -196,6 +212,7 @@ export default function ReportsPage() {
         case 'balance_sheet':
           reportTitle = reportType === 'balance_sheet' ? `Balance Sheet as of ${format(endDate || new Date(), "PPP")}` : `Budget vs. Actuals ${periodString}`;
           rawData = accounts || [];
+          effectiveReportType = reportType;
           break;
       }
       
@@ -210,9 +227,9 @@ export default function ReportsPage() {
       }
 
       if (formatType === 'csv') {
-        downloadCsv(rawData, reportTitle, reportType, reportOptions);
+        downloadCsv(rawData, reportTitle, effectiveReportType, reportOptions);
       } else {
-        downloadPdf(rawData, reportTitle, reportType, reportOptions);
+        downloadPdf(rawData, reportTitle, effectiveReportType, reportOptions);
       }
 
       toast({ title: "Success", description: `Report has been prepared for download.` });
@@ -241,7 +258,7 @@ export default function ReportsPage() {
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
 
 
-  if (authLoading || loadingAccounts || loadingIncome || loadingExpenses || loadingMembers || loadingIncomeSources || loadingExpenseSources) {
+  if (authLoading) {
     return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
   }
   if (authError) {
@@ -268,7 +285,7 @@ export default function ReportsPage() {
           <CardDescription>Select your report criteria and download the data in your desired format.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div className="space-y-2">
               <Label>1. Select Report Type</Label>
               <Select value={reportType} onValueChange={(v) => setReportType(v as ReportType)} disabled={isGenerating}>
@@ -276,17 +293,32 @@ export default function ReportsPage() {
                   <SelectValue placeholder="Choose a report type..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="summary">Financial Summary</SelectItem>
-                  <SelectItem value="income">Income Report</SelectItem>
-                  <SelectItem value="expenses">Expense Report</SelectItem>
-                  <SelectItem value="budget_vs_actuals">Budget vs Actuals</SelectItem>
+                  <SelectItem value="budget_vs_actuals">Full Budget vs Actuals</SelectItem>
+                  <SelectItem value="income">Income Reports</SelectItem>
+                  <SelectItem value="expenses">Expense Reports</SelectItem>
                   <SelectItem value="balance_sheet">Balance Sheet</SelectItem>
+                  <SelectItem value="summary">High-level Summary</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {(reportType === 'income' || reportType === 'expenses') && (
+               <div className="space-y-2 animate-in slide-in-from-left-2 duration-300">
+                  <Label>2. Detail Level</Label>
+                  <Select value={detailLevel} onValueChange={(v) => setDetailLevel(v as DetailLevel)} disabled={isGenerating}>
+                    <SelectTrigger>
+                        <ListFilter className="mr-2 h-4 w-4 opacity-50" />
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="summary">Summary (Accounts Only)</SelectItem>
+                        <SelectItem value="detailed">Detailed (All Transactions)</SelectItem>
+                    </SelectContent>
+                  </Select>
+               </div>
+            )}
             {showPeriodSelector && (
               <div className="space-y-2">
-                <Label>2. Select Period</Label>
+                <Label>{(reportType === 'income' || reportType === 'expenses') ? '3. Select Period' : '2. Select Period'}</Label>
                 <Select value={periodType} onValueChange={(v) => setPeriodType(v as PeriodType)} disabled={isGenerating}>
                    <SelectTrigger>
                       <SelectValue placeholder="Choose a period..." />
@@ -304,7 +336,7 @@ export default function ReportsPage() {
           <div className="grid md:grid-cols-2 gap-6">
             {periodType === 'monthly' && showPeriodSelector && (
               <div className="space-y-2">
-                <Label>3. Select Month</Label>
+                <Label>Select Month</Label>
                  <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" className="w-full md:w-[280px] justify-start text-left font-normal" disabled={isGenerating}>
@@ -328,7 +360,7 @@ export default function ReportsPage() {
             )}
             {(periodType === 'custom' || reportType === 'balance_sheet') && (
               <div className="space-y-2">
-                  <Label>{reportType === 'balance_sheet' ? 'Select Date' : '3. Select Date Range'}</Label>
+                  <Label>{reportType === 'balance_sheet' ? 'As of Date' : 'Select Date Range'}</Label>
                   <Popover>
                       <PopoverTrigger asChild>
                       <Button
@@ -369,7 +401,7 @@ export default function ReportsPage() {
               </div>
             )}
 
-            {(reportType === 'budget_vs_actuals') && (
+            {(reportType === 'budget_vs_actuals' || ( (reportType === 'income' || reportType === 'expenses') && detailLevel === 'summary')) && (
                <div className="space-y-2">
                  <Label>Select Budget Year</Label>
                  <Select value={String(budgetYear)} onValueChange={(v) => setBudgetYear(Number(v))} disabled={isGenerating}>
@@ -476,5 +508,3 @@ export default function ReportsPage() {
     </div>
   );
 }
-
-    

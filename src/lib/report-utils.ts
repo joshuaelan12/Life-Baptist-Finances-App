@@ -17,12 +17,24 @@ const formatCurrency = (val: number | null | undefined) => {
     return val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' XAF';
 };
 
+interface ReportOptions {
+    budgetYear?: number;
+    periodString?: string;
+    incomeRecords?: IncomeRecord[];
+    expenseRecords?: ExpenseRecord[];
+    incomeSources?: IncomeSource[];
+    expenseSources?: ExpenseSource[];
+    startDate?: Date;
+    endDate?: Date;
+    typeFilter?: AccountType[]; // Added to filter hierarchical reports
+}
+
 const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions) => {
     const csvData: any[] = [];
     const headers = ['Level', 'Code', 'Name', 'Category/Type', 'Budget', 'Realized', '% Realized'];
     csvData.push(headers);
 
-    const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
+    const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
     const accounts = data as Account[];
     const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate } = options;
 
@@ -143,17 +155,6 @@ export const downloadCsv = (data: any[], reportTitle: string, reportType: string
     writeFile(wb, fileName);
 };
 
-interface ReportOptions {
-    budgetYear?: number;
-    periodString?: string;
-    incomeRecords?: IncomeRecord[];
-    expenseRecords?: ExpenseRecord[];
-    incomeSources?: IncomeSource[];
-    expenseSources?: ExpenseSource[];
-    startDate?: Date;
-    endDate?: Date;
-}
-
 
 const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptions): { headers: string[][], rows: any[][], total?: number, body: any[] } => {
     if (data.length === 0) return { headers: [], rows: [], body: [] };
@@ -203,7 +204,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
             break;
         case 'budget_vs_actuals':
         case 'balance_sheet':
-             const typeOrder: AccountType[] = ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
+             const typeOrder: AccountType[] = options.typeFilter || ['Balance', 'Income', 'Liability', 'Assets', 'Expense'];
              const accounts = data as Account[];
              const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear() } = options;
 
