@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useMemo } from 'react';
@@ -7,7 +6,7 @@ import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firesto
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { IncomeSource, IncomeRecord, IncomeSourceFirestore, IncomeRecordFirestore, IncomeFormValues, Member, MemberFirestore } from '@/types';
-import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2 } from 'lucide-react';
+import { Loader2, AlertTriangle, ArrowLeft, DollarSign, PlusCircle, Edit, Trash2, User } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -32,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 const incomeSourceConverter = {
     fromFirestore: (snapshot: any): IncomeSource => {
-        const data = snapshot.data() as Omit<IncomeSourceFirestore, 'id'>;
+        const data = snapshot.data();
         return {
             id: snapshot.id,
             ...data,
@@ -99,10 +98,14 @@ export default function IncomeSourceDetailsPage() {
         },
     });
 
+    // Sync form with source properties
     React.useEffect(() => {
         if (source) {
             form.setValue('category', source.category);
             form.setValue('accountId', source.accountId || '');
+            if (!form.getValues('transactionName')) {
+                form.setValue('transactionName', source.transactionName);
+            }
         }
     }, [source, form]);
 
@@ -138,7 +141,7 @@ export default function IncomeSourceDetailsPage() {
             }
             form.reset({ 
                 code: "", 
-                transactionName: "", 
+                transactionName: source.transactionName, 
                 date: new Date(), 
                 amount: 0, 
                 description: "", 
@@ -184,7 +187,7 @@ export default function IncomeSourceDetailsPage() {
     const isLoading = loadingSource || loadingTransactions || authLoading || loadingMembers;
     const error = errorSource || errorTransactions;
 
-    if (isLoading) {
+    if (isLoading && !source) {
         return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
     }
 
@@ -229,7 +232,7 @@ export default function IncomeSourceDetailsPage() {
                       <div className="flex items-center space-x-4 rounded-md border p-4">
                         <div className="flex-1 space-y-1">
                           <p className="text-sm font-medium leading-none">% Realized</p>
-                          <p className="text-xl font-semibold">{percentageRealized.toFixed(1)}%</p>
+                          <p className={`text-xl font-semibold ${percentageRealized > 100 ? 'text-destructive' : 'text-foreground'}`}>{percentageRealized.toFixed(1)}%</p>
                         </div>
                       </div>
                 </CardContent>
@@ -264,16 +267,19 @@ export default function IncomeSourceDetailsPage() {
                                 <FormField control={form.control} name="transactionName" render={({ field }) => (
                                     <FormItem><FormLabel>Name/Purpose</FormLabel><FormControl><Input placeholder="e.g. Sunday Collection" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
-                                {source.category === 'Tithe' && (
-                                    <FormField control={form.control} name="memberName" render={({ field }) => (
-                                        <FormItem><FormLabel>Member Name</FormLabel>
-                                            <Select onValueChange={field.onChange} value={field.value || ""}>
-                                                <FormControl><SelectTrigger><SelectValue placeholder="Select a member" /></SelectTrigger></FormControl>
-                                                <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
-                                            </Select>
-                                        <FormMessage /></FormItem>
-                                    )}/>
-                                )}
+                                
+                                <FormField control={form.control} name="memberName" render={({ field }) => (
+                                    <FormItem><FormLabel>Member (Optional for non-Tithes)</FormLabel>
+                                        <Select onValueChange={field.onChange} value={field.value || ""}>
+                                            <FormControl><SelectTrigger><SelectValue placeholder={loadingMembers ? "Loading members..." : "Select a member"} /></SelectTrigger></FormControl>
+                                            <SelectContent>
+                                                <SelectItem value=" ">None</SelectItem>
+                                                {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    <FormMessage /></FormItem>
+                                )}/>
+
                                 <FormField control={form.control} name="amount" render={({ field }) => (
                                     <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                                 )}/>
@@ -307,7 +313,11 @@ export default function IncomeSourceDetailsPage() {
                                                 <TableCell>
                                                     <div className="flex flex-col">
                                                         <span className="font-medium">{tx.transactionName}</span>
-                                                        {tx.memberName && <span className="text-xs text-muted-foreground">{tx.memberName}</span>}
+                                                        {tx.memberName && tx.memberName.trim() !== "" && (
+                                                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                                                <User className="h-3 w-3" /> {tx.memberName}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-right font-medium">{formatCurrency(tx.amount)}</TableCell>
@@ -344,8 +354,8 @@ export default function IncomeSourceDetailsPage() {
             <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
-                        <DialogTitle>Edit Income Transaction</DialogTitle>
-                        <DialogDescription>Update the details for this transaction.</DialogDescription>
+                        <DialogTitle>Edit Transaction</DialogTitle>
+                        <DialogDescription>Update the details for this record.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
@@ -365,16 +375,19 @@ export default function IncomeSourceDetailsPage() {
                             <FormField control={form.control} name="transactionName" render={({ field }) => (
                                 <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
                             )}/>
-                             {source.category === 'Tithe' && (
-                                <FormField control={form.control} name="memberName" render={({ field }) => (
-                                    <FormItem><FormLabel>Member Name</FormLabel>
-                                        <Select onValueChange={field.onChange} value={field.value || ""}>
-                                            <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
-                                            <SelectContent>{members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}</SelectContent>
-                                        </Select>
-                                    <FormMessage /></FormItem>
-                                )}/>
-                            )}
+                            
+                            <FormField control={form.control} name="memberName" render={({ field }) => (
+                                <FormItem><FormLabel>Member</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                                        <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
+                                        <SelectContent>
+                                            <SelectItem value=" ">None</SelectItem>
+                                            {members?.map(m => <SelectItem key={m.id} value={m.fullName}>{m.fullName}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                <FormMessage /></FormItem>
+                            )}/>
+
                             <FormField control={form.control} name="amount" render={({ field }) => (
                                 <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
                             )}/>
