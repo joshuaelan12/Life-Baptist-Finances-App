@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useMemo } from 'react';
@@ -9,11 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useToast } from "@/hooks/use-toast";
-import { UserPlus, Edit, Trash2, Loader2, AlertTriangle, Users, Search, HandCoins, CalendarIcon } from "lucide-react";
+import { UserPlus, Edit, Trash2, Loader2, AlertTriangle, Users, Search, HandCoins, CalendarIcon, Info } from "lucide-react";
 import { auth, db } from '@/lib/firebase';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useCollectionData } from 'react-firebase-hooks/firestore';
@@ -346,11 +345,14 @@ export default function MembersPage() {
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={titheForm.control} name="accountId" render={({ field }) => (
-                                <FormItem><FormLabel>Link to Tithe Fund</FormLabel>
+                                <FormItem><FormLabel>Assign to Income Fund</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Select fund" /></SelectTrigger></FormControl>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select accounting fund" /></SelectTrigger></FormControl>
                                         <SelectContent>{titheSources?.map(s => <SelectItem key={s.id} value={s.accountId || ''}>{s.transactionName}</SelectItem>)}</SelectContent>
                                     </Select>
+                                    <FormDescription className="flex items-center gap-1">
+                                        <Info className="h-3 w-3" /> Connects this tithe to your general church budget categories.
+                                    </FormDescription>
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={titheForm.control} name="code" render={({ field }) => (

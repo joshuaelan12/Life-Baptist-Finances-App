@@ -6,7 +6,7 @@ import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firesto
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues, IncomeSource, IncomeSourceFirestore } from '@/types';
-import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins, Edit, Trash2, CalendarIcon, PlusCircle } from 'lucide-react';
+import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins, Edit, Trash2, CalendarIcon, PlusCircle, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -16,7 +16,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '@/lib/firebase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -77,7 +77,6 @@ export default function MemberTitheDetailsPage() {
     const memberRef = useMemo(() => memberId ? doc(db, 'members', memberId).withConverter(memberConverter) : null, [memberId]);
     const [member, loadingMember, errorMember] = useDocumentData(memberRef);
 
-    // Fetch tithe-category income sources to link records correctly
     const sourcesQuery = useMemo(() => authUser ? query(collection(db, 'income_sources'), where('category', '==', 'Tithe')) : null, [authUser]);
     const [titheSources, loadingSources] = useCollectionData(sourcesQuery?.withConverter(incomeSourceConverter));
 
@@ -106,7 +105,6 @@ export default function MemberTitheDetailsPage() {
         },
     });
 
-    // Update form when member or sources change
     useEffect(() => {
         if (member) {
             form.setValue('memberName', member.fullName);
@@ -313,7 +311,7 @@ export default function MemberTitheDetailsPage() {
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Record Tithe for {member.fullName}</DialogTitle>
-                        <DialogDescription>Enter the details for a tithe payment. You can select past months if needed.</DialogDescription>
+                        <DialogDescription>Enter the details for a tithe payment. You can select past dates if needed.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleAdd)} className="space-y-4 py-4">
@@ -335,13 +333,16 @@ export default function MemberTitheDetailsPage() {
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={form.control} name="accountId" render={({ field }) => (
-                                <FormItem><FormLabel>Tithe Fund Source</FormLabel>
+                                <FormItem><FormLabel>Assign to Income Fund</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Select tithe category fund" /></SelectTrigger></FormControl>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select accounting fund" /></SelectTrigger></FormControl>
                                         <SelectContent>
                                             {titheSources?.map(s => <SelectItem key={s.id} value={s.accountId || ''}>{s.transactionName}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
+                                    <FormDescription className="flex items-center gap-1">
+                                        <Info className="h-3 w-3" /> Links this payment to a budget category in your Income reports.
+                                    </FormDescription>
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={form.control} name="code" render={({ field }) => (
