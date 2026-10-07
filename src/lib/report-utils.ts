@@ -1,5 +1,5 @@
 
-import { format } from 'date-fns';
+import { format, startOfYear, endOfYear } from 'date-fns';
 import { utils, writeFile } from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -39,8 +39,14 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions, rep
     const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], budgetYear = new Date().getFullYear(), startDate, endDate, balanceBroughtForward = 0 } = options;
 
     const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
-        if (!startDate || !endDate) return records;
-        return records.filter(r => r.date >= startDate && r.date <= endDate);
+        // For Balance Sheet, we count from the beginning of time up to the end date
+        const effectiveStart = (reportType === 'balance_sheet') ? undefined : startDate;
+        if (!effectiveStart && !endDate) return records;
+        return records.filter(r => {
+            const afterStart = effectiveStart ? r.date >= effectiveStart : true;
+            const beforeEnd = endDate ? r.date <= endDate : true;
+            return afterStart && beforeEnd;
+        });
     };
 
     const filteredIncomeRecords = filterByDate(incomeRecords);
@@ -53,13 +59,13 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions, rep
         if (relevantAccounts.length > 0) {
             csvData.push([type.toUpperCase()]); 
             
-            // Add B/F as an adjustment line if it's Income section
+            // Add B/F as an adjustment line if it's Income section, but don't include in subtotals
             if (type === 'Income' && balanceBroughtForward !== 0) {
                 csvData.push(['Adjustment', '', `Balance Brought Forward (from ${budgetYear - 1})`, 'Historical', 0, balanceBroughtForward, 'N/A']);
             }
 
             let typeBudgetTotal = 0;
-            let typeRealizedTotal = 0; // Don't include B/F in the sub-total sum per user request
+            let typeRealizedTotal = 0; 
 
             relevantAccounts.forEach((account: Account) => {
                 const accountBudget = account.budgets?.[budgetYear] || 0;
@@ -139,16 +145,21 @@ const generateHierarchicalDataForCsv = (data: any[], options: ReportOptions, rep
         csvData.push(['GRAND SUMMARY: AVAILABLE BALANCE']);
         csvData.push(['Available Balance', '', '', '', grandBudgetTotal, grandRealizedTotal, '']);
     } else if (reportType === 'balance_sheet') {
-        // Church Status Table for Excel
-        const totalIncomeActual = filteredIncomeRecords.reduce((sum, r) => sum + r.amount, 0);
-        const totalExpenseActual = filteredExpenseRecords.reduce((sum, r) => sum + r.amount, 0);
-        const totalIncomeWithBF = totalIncomeActual + balanceBroughtForward;
-        const currentNetPosition = totalIncomeWithBF - totalExpenseActual;
+        // Church Status Table for Excel (based on Dashboard Logic)
+        // Dashboard logic: Income of selected year + B/F vs Expenses of selected year
+        const yearStart = startOfYear(endDate || new Date());
+        const yearEnd = endDate || endOfYear(endDate || new Date());
+
+        const currentYearIncome = incomeRecords.filter(r => r.date >= yearStart && r.date <= yearEnd).reduce((sum, r) => sum + r.amount, 0);
+        const currentYearExpense = expenseRecords.filter(r => r.date >= yearStart && r.date <= yearEnd).reduce((sum, r) => sum + r.amount, 0);
+        
+        const totalIncomeWithBF = currentYearIncome + balanceBroughtForward;
+        const currentNetPosition = totalIncomeWithBF - currentYearExpense;
 
         csvData.push(['CHURCH FINANCIAL STATUS']);
         csvData.push(['Church Status Item', 'Total Amount']);
         csvData.push([`Total Income (incl. B/F from ${budgetYear - 1})`, totalIncomeWithBF]);
-        csvData.push(['Total Expenses (Current Period)', totalExpenseActual]);
+        csvData.push(['Total Expenses (Current Period)', currentYearExpense]);
         csvData.push(['Current Net Available Position', currentNetPosition]);
     }
 
@@ -186,8 +197,13 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
     const { incomeRecords = [], expenseRecords = [], incomeSources = [], expenseSources = [], startDate, endDate, budgetYear = new Date().getFullYear(), balanceBroughtForward = 0, periodString = "" } = options;
 
     const filterByDate = (records: (IncomeRecord | ExpenseRecord)[]) => {
-        if (!startDate || !endDate) return records;
-        return records.filter(r => r.date >= startDate && r.date <= endDate);
+        const effectiveStart = (reportType === 'balance_sheet') ? undefined : startDate;
+        if (!effectiveStart && !endDate) return records;
+        return records.filter(r => {
+            const afterStart = effectiveStart ? r.date >= effectiveStart : true;
+            const beforeEnd = endDate ? r.date <= endDate : true;
+            return afterStart && beforeEnd;
+        });
     }
 
     const filteredIncomeRecords = filterByDate(incomeRecords);
@@ -241,7 +257,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                  if (groupedAccounts.length > 0) {
                      body.push([{ content: type.toUpperCase(), colSpan: 5, styles: { fontStyle: 'bold', fillColor: '#346F4F', textColor: '#F7F2ED', halign: 'center' } }]);
                      
-                     // Add Balance B/F line for Income section
+                     // Add Balance B/F line for Income section, excluded from subtotals
                      if (type === 'Income' && balanceBroughtForward !== 0) {
                          body.push([
                              { content: `Adjustment: Balance Brought Forward (from ${budgetYear - 1})`, styles: { fontStyle: 'italic', fillColor: '#F0F0F0' } },
@@ -253,7 +269,7 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                      }
 
                      let typeBudgetTotal = 0;
-                     let typeRealizedTotal = 0; // Don't include B/F in account subtotals per user request
+                     let typeRealizedTotal = 0; 
 
                      groupedAccounts.forEach((account: Account) => {
                          const accountBudget = account.budgets?.[budgetYear] || 0;
@@ -332,17 +348,21 @@ const getHeadersAndRows = (data: any[], reportType: string, options: ReportOptio
                     { content: '', styles: { fillColor: '#346F4F' } }
                 ]);
              } else if (reportType === 'balance_sheet') {
-                // Construct Status Table for Balance Sheet
-                const totalIncomeActual = filteredIncomeRecords.reduce((sum, r) => sum + r.amount, 0);
-                const totalExpenseActual = filteredExpenseRecords.reduce((sum, r) => sum + r.amount, 0);
-                const totalIncomeWithBF = totalIncomeActual + balanceBroughtForward;
-                const currentNetPosition = totalIncomeWithBF - totalExpenseActual;
+                // Dashboard logic for Church Financial Status
+                const yearStart = startOfYear(endDate || new Date());
+                const yearEnd = endDate || endOfYear(endDate || new Date());
+
+                const currentYearIncome = incomeRecords.filter(r => r.date >= yearStart && r.date <= yearEnd).reduce((sum, r) => sum + r.amount, 0);
+                const currentYearExpense = expenseRecords.filter(r => r.date >= yearStart && r.date <= yearEnd).reduce((sum, r) => sum + r.amount, 0);
+                
+                const totalIncomeWithBF = currentYearIncome + balanceBroughtForward;
+                const currentNetPosition = totalIncomeWithBF - currentYearExpense;
 
                 statusTable = {
                     headers: [['Church Status Item', 'Total Amount']],
                     body: [
                         [`Total Income (incl. B/F from ${budgetYear - 1})`, formatCurrency(totalIncomeWithBF)],
-                        ['Total Expenses (Current Period)', formatCurrency(totalExpenseActual)],
+                        ['Total Expenses (Current Period)', formatCurrency(currentYearExpense)],
                         [{ content: 'Current Net Available Position', styles: { fontStyle: 'bold', fillColor: '#EBE2DA' } }, { content: formatCurrency(currentNetPosition), styles: { fontStyle: 'bold', fillColor: '#EBE2DA', halign: 'right' } }]
                     ]
                 };
