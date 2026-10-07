@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useMemo, useState, useEffect } from 'react';
@@ -27,10 +28,11 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { incomeSchema } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { updateIncomeTransaction, deleteIncomeTransaction, addIncomeTransaction } from '@/services/incomeTransactionService';
+import { z } from 'zod';
 
 const memberConverter = {
     fromFirestore: (snapshot: any): Member => {
-        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
+        const data = snapshot.data();
         return {
             id: snapshot.id,
             ...data,
@@ -42,12 +44,12 @@ const memberConverter = {
 
 const incomeConverter = {
     fromFirestore: (snapshot: any): IncomeRecord => {
-      const data = snapshot.data() as Omit<IncomeRecordFirestore, 'id'>;
+      const data = snapshot.data();
       return {
         id: snapshot.id,
         ...data,
         date: (data.date as Timestamp).toDate(),
-      };
+      } as IncomeRecord;
     }
   };
 
@@ -91,8 +93,12 @@ export default function MemberTitheDetailsPage() {
     
     const [titheRecords, loadingTithes, errorTithes] = useCollectionData(titheQuery);
 
-    const form = useForm<IncomeFormValues>({
-        resolver: zodResolver(incomeSchema),
+    const titheFormSchema = incomeSchema.extend({
+        incomeSourceId: z.string().min(1, "Please select a fund source")
+    });
+
+    const form = useForm<z.infer<typeof titheFormSchema>>({
+        resolver: zodResolver(titheFormSchema),
         defaultValues: {
             code: "",
             transactionName: "",
@@ -100,8 +106,9 @@ export default function MemberTitheDetailsPage() {
             amount: 0,
             description: "",
             category: "Tithe",
-            accountId: "",
+            accountId: "placeholder",
             memberName: "",
+            incomeSourceId: "",
         },
     });
 
@@ -110,17 +117,13 @@ export default function MemberTitheDetailsPage() {
             form.setValue('memberName', member.fullName);
             form.setValue('transactionName', `Tithe - ${member.fullName}`);
         }
-        if (titheSources && titheSources.length > 0) {
-            const firstSource = titheSources[0];
-            form.setValue('accountId', firstSource.accountId || '');
-        }
-    }, [member, titheSources, form]);
+    }, [member, form]);
 
     const totalTithes = useMemo(() => {
         return titheRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
     }, [titheRecords]);
 
-    const handleUpdate = async (data: IncomeFormValues) => {
+    const handleUpdate = async (data: z.infer<typeof titheFormSchema>) => {
         if (!authUser || !editingTransaction) return;
         try {
             await updateIncomeTransaction(editingTransaction.id, data, authUser.uid, authUser.email);
@@ -132,17 +135,18 @@ export default function MemberTitheDetailsPage() {
         }
     };
 
-    const handleAdd = async (data: IncomeFormValues) => {
+    const handleAdd = async (data: z.infer<typeof titheFormSchema>) => {
         if (!authUser || !member) return;
         
-        const selectedSource = titheSources?.find(s => s.accountId === data.accountId);
+        const selectedSource = titheSources?.find(s => s.id === data.incomeSourceId);
         if (!selectedSource) {
-            toast({ variant: "destructive", title: "Config Error", description: "Please select a valid income source for this tithe." });
+            toast({ variant: "destructive", title: "Config Error", description: "Please select a valid fund source for this tithe." });
             return;
         }
 
         try {
-            await addIncomeTransaction(data, selectedSource.id, authUser.uid, authUser.email);
+            const finalData = { ...data, accountId: selectedSource.accountId || "" };
+            await addIncomeTransaction(finalData, selectedSource.id, authUser.uid, authUser.email);
             toast({ title: "Success", description: "Tithe recorded successfully." });
             setIsAddDialogOpen(false);
             form.reset({
@@ -152,8 +156,9 @@ export default function MemberTitheDetailsPage() {
                 amount: 0,
                 description: "",
                 category: "Tithe",
-                accountId: selectedSource.accountId || '',
+                accountId: "placeholder",
                 memberName: member.fullName,
+                incomeSourceId: selectedSource.id,
             });
         } catch (error: any) {
             toast({ variant: "destructive", title: "Error", description: error.message || "Failed to record tithe." });
@@ -179,8 +184,9 @@ export default function MemberTitheDetailsPage() {
             amount: transaction.amount,
             description: transaction.description || "",
             category: "Tithe",
-            accountId: transaction.accountId || "",
+            accountId: transaction.accountId || "placeholder",
             memberName: transaction.memberName || member?.fullName || "",
+            incomeSourceId: transaction.incomeSourceId || "",
         });
         setIsEditDialogOpen(true);
     };
@@ -193,68 +199,39 @@ export default function MemberTitheDetailsPage() {
     const error = errorMember || errorTithes || authError;
 
     if (isLoading) {
-        return (
-            <div className="flex justify-center items-center h-screen">
-                <Loader2 className="h-12 w-12 animate-spin text-primary" />
-            </div>
-        );
+        return <div className="flex justify-center items-center h-screen"><Loader2 className="h-12 w-12 animate-spin text-primary" /></div>;
     }
 
     if (error) {
-        return (
-            <Alert variant="destructive" className="m-6">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{error.message}</AlertDescription>
-            </Alert>
-        );
+        return <Alert variant="destructive" className="m-6"><AlertTriangle className="h-4 w-4" /><AlertTitle>Error</AlertTitle><AlertDescription>{error.message}</AlertDescription></Alert>;
     }
     
     if (!member) {
-        return (
-            <Alert variant="destructive" className="m-6">
-                <AlertTriangle className="h-4 w-4" />
-                <AlertTitle>Not Found</AlertTitle>
-                <AlertDescription>The requested member could not be found.</AlertDescription>
-            </Alert>
-        );
+        return <Alert variant="destructive" className="m-6"><AlertTriangle className="h-4 w-4" /><AlertTitle>Not Found</AlertTitle><AlertDescription>The requested member could not be found.</AlertDescription></Alert>;
     }
 
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <Button variant="outline" onClick={() => router.back()}>
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Back to Members
-                </Button>
-                <Button onClick={() => setIsAddDialogOpen(true)}>
-                    <PlusCircle className="mr-2 h-4 w-4" /> Add Tithe Record
-                </Button>
+                <Button variant="outline" onClick={() => router.back()}><ArrowLeft className="mr-2 h-4 w-4" /> Back to Members</Button>
+                <Button onClick={() => setIsAddDialogOpen(true)}><PlusCircle className="mr-2 h-4 w-4" /> Add Tithe Record</Button>
             </div>
 
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-3">
-                        <HandCoins className="h-8 w-8 text-primary" />
-                        <span>Tithe History for {member.fullName}</span>
-                    </CardTitle>
+                    <CardTitle className="flex items-center gap-3"><HandCoins className="h-8 w-8 text-primary" /><span>Tithe History for {member.fullName}</span></CardTitle>
                     <CardDescription>View, edit, or delete all tithes recorded for this member.</CardDescription>
                 </CardHeader>
                 <CardContent>
                      <div className="flex items-center space-x-4 rounded-md border p-4 bg-muted/50">
                         <DollarSign className="h-8 w-8 text-emerald-500" />
-                        <div className="flex-1 space-y-1">
-                          <p className="text-sm font-medium leading-none">Total Tithes Paid</p>
-                          <p className="text-2xl font-bold">{formatCurrency(totalTithes)}</p>
-                        </div>
+                        <div className="flex-1 space-y-1"><p className="text-sm font-medium leading-none">Total Tithes Paid</p><p className="text-2xl font-bold">{formatCurrency(totalTithes)}</p></div>
                       </div>
                 </CardContent>
             </Card>
 
             <Card>
-                <CardHeader>
-                    <CardTitle>Tithe Records</CardTitle>
-                    <CardDescription>List of individual tithe payments.</CardDescription>
-                </CardHeader>
+                <CardHeader><CardTitle>Tithe Records</CardTitle><CardDescription>List of individual tithe payments.</CardDescription></CardHeader>
                 <CardContent>
                     {!titheRecords || titheRecords.length === 0 ? (
                         <p className="text-center text-muted-foreground py-10">No tithe records found for this member.</p>
@@ -280,20 +257,10 @@ export default function MemberTitheDetailsPage() {
                                             <TableCell className="text-right space-x-1">
                                                 <Button variant="ghost" size="icon" onClick={() => openEditDialog(record)} aria-label="Edit Tithe"><Edit className="h-4 w-4" /></Button>
                                                 <AlertDialog>
-                                                    <AlertDialogTrigger asChild>
-                                                        <Button variant="ghost" size="icon" aria-label="Delete Tithe"><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                                                    </AlertDialogTrigger>
+                                                    <AlertDialogTrigger asChild><Button variant="ghost" size="icon" aria-label="Delete Tithe"><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
                                                     <AlertDialogContent>
-                                                        <AlertDialogHeader>
-                                                            <AlertDialogTitle>Delete Tithe Record?</AlertDialogTitle>
-                                                            <AlertDialogDescription>
-                                                                Are you sure you want to delete this tithe record of {formatCurrency(record.amount)}? This action cannot be undone.
-                                                            </AlertDialogDescription>
-                                                        </AlertDialogHeader>
-                                                        <AlertDialogFooter>
-                                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                            <AlertDialogAction onClick={() => handleDelete(record.id)}>Delete</AlertDialogAction>
-                                                        </AlertDialogFooter>
+                                                        <AlertDialogHeader><AlertDialogTitle>Delete Tithe Record?</AlertDialogTitle><AlertDialogDescription>Are you sure you want to delete this tithe record of {formatCurrency(record.amount)}? This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
+                                                        <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDelete(record.id)}>Delete</AlertDialogAction></AlertDialogFooter>
                                                     </AlertDialogContent>
                                                 </AlertDialog>
                                             </TableCell>
@@ -311,38 +278,27 @@ export default function MemberTitheDetailsPage() {
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Record Tithe for {member.fullName}</DialogTitle>
-                        <DialogDescription>Enter the details for a tithe payment. You can select past dates if needed.</DialogDescription>
+                        <DialogDescription>Enter the details for a tithe payment. Ensure an Income Source with category "Tithe" exists.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleAdd)} className="space-y-4 py-4">
                             <FormField control={form.control} name="date" render={({ field }) => (
                                 <FormItem className="flex flex-col"><FormLabel>Payment Date</FormLabel>
                                     <Popover>
-                                        <PopoverTrigger asChild>
-                                            <FormControl>
-                                                <Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >
-                                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                </Button>
-                                            </FormControl>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start">
-                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
-                                        </PopoverContent>
+                                        <PopoverTrigger asChild><FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
-                            <FormField control={form.control} name="accountId" render={({ field }) => (
-                                <FormItem><FormLabel>Assign to Income Fund</FormLabel>
+                            <FormField control={form.control} name="incomeSourceId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Fund Source</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Select accounting fund" /></SelectTrigger></FormControl>
+                                        <FormControl><SelectTrigger><SelectValue placeholder={titheSources && titheSources.length > 0 ? "Select budget category" : "No tithe funds found"}/></SelectTrigger></FormControl>
                                         <SelectContent>
-                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.accountId || ''}>{s.transactionName}</SelectItem>)}
+                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
-                                    <FormDescription className="flex items-center gap-1">
-                                        <Info className="h-3 w-3" /> Links this payment to a budget category in your Income reports.
-                                    </FormDescription>
+                                    <FormDescription className="flex items-center gap-1"><Info className="h-3 w-3" /> Connects this payment to a budget category in reports.</FormDescription>
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={form.control} name="code" render={({ field }) => (
@@ -356,10 +312,7 @@ export default function MemberTitheDetailsPage() {
                             )}/>
                             <DialogFooter>
                                 <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                                <Button type="submit" disabled={form.formState.isSubmitting}>
-                                    {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                                    Record Tithe
-                                </Button>
+                                <Button type="submit" disabled={form.formState.isSubmitting}>{form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null} Record Tithe</Button>
                             </DialogFooter>
                         </form>
                     </Form>
@@ -369,27 +322,25 @@ export default function MemberTitheDetailsPage() {
             {/* Edit Tithe Dialog */}
             <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
                 <DialogContent className="max-w-lg">
-                    <DialogHeader>
-                        <DialogTitle>Edit Tithe Record</DialogTitle>
-                        <DialogDescription>Update the details for this member's tithe payment.</DialogDescription>
-                    </DialogHeader>
+                    <DialogHeader><DialogTitle>Edit Tithe Record</DialogTitle><DialogDescription>Update the details for this member's tithe payment.</DialogDescription></DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(handleUpdate)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
                             <FormField control={form.control} name="date" render={({ field }) => (
                                 <FormItem className="flex flex-col"><FormLabel>Date</FormLabel>
                                     <Popover>
-                                        <PopoverTrigger asChild>
-                                            <FormControl>
-                                                <Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >
-                                                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                                </Button>
-                                            </FormControl>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0" align="start">
-                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
-                                        </PopoverContent>
+                                        <PopoverTrigger asChild><FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
                                     </Popover>
+                                <FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="incomeSourceId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Fund Source</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                                        <FormControl><SelectTrigger><SelectValue placeholder="Select fund" /></SelectTrigger></FormControl>
+                                        <SelectContent>
+                                            {titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
                                 <FormMessage /></FormItem>
                             )}/>
                             <FormField control={form.control} name="code" render={({ field }) => (
@@ -403,10 +354,7 @@ export default function MemberTitheDetailsPage() {
                             )}/>
                             <DialogFooter>
                                 <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                                <Button type="submit" disabled={form.formState.isSubmitting}>
-                                    {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                                    Save Changes
-                                </Button>
+                                <Button type="submit" disabled={form.formState.isSubmitting}>{form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null} Save Changes</Button>
                             </DialogFooter>
                         </form>
                     </Form>

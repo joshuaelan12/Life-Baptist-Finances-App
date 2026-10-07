@@ -100,17 +100,18 @@ export default function IncomePage() {
     },
   });
 
-  const transactionForm = useForm<IncomeFormValues>({
-    resolver: zodResolver(incomeSchema),
+  const transactionForm = useForm<IncomeFormValues & { incomeSourceId?: string }>({
+    resolver: zodResolver(incomeSchema.extend({ incomeSourceId: z.string().min(1, "Fund is required") })),
     defaultValues: {
         code: "",
         transactionName: "",
         date: new Date(),
         amount: 0,
         category: "Offering",
-        accountId: "",
+        accountId: "placeholder", // Not directly used in Quick Record now
         description: "",
         memberName: "",
+        incomeSourceId: "",
     }
   });
 
@@ -158,20 +159,24 @@ export default function IncomePage() {
     }
   };
 
-  const onTransactionSubmit = async (data: IncomeFormValues) => {
+  const onTransactionSubmit = async (data: IncomeFormValues & { incomeSourceId?: string }) => {
     if (!authUser?.uid || !authUser.email) return;
     
-    // Find the source ID based on accountId and category to match existing source
-    // In Quick Record, we might want to select the Source directly
-    const source = incomeSources?.find(s => s.accountId === data.accountId && s.category === data.category);
-    if (!source) {
-        toast({ variant: "destructive", title: "Config Error", description: "No budgeted income category found for this selection. Create a Source first." });
+    if (!data.incomeSourceId) {
+        toast({ variant: "destructive", title: "Config Error", description: "No budgeted income category selected." });
         return;
     }
 
+    const source = incomeSources?.find(s => s.id === data.incomeSourceId);
+    if (!source) return;
+
     setIsSubmitting(true);
     try {
-        const finalData = { ...data, memberName: data.memberName === "none" ? "" : data.memberName };
+        const finalData = { 
+            ...data, 
+            accountId: source.accountId || "",
+            memberName: data.memberName === "none" ? "" : data.memberName 
+        };
         await addIncomeTransaction(finalData, source.id, authUser.uid, authUser.email);
         toast({ title: "Success", description: "Transaction recorded successfully." });
         setIsQuickRecordOpen(false);
@@ -242,6 +247,11 @@ export default function IncomePage() {
 
   const yearOptions = Array.from({length: 11}, (_, i) => new Date().getFullYear() + 5 - i);
   const isLoading = authLoading || loadingSources || loadingAccounts || loadingRecords || loadingMembers;
+
+  const quickRecordCategory = transactionForm.watch('category');
+  const availableFunds = useMemo(() => {
+    return incomeSources?.filter(s => s.category === quickRecordCategory) || [];
+  }, [incomeSources, quickRecordCategory]);
 
   return (
     <div className="space-y-6 md:space-y-8">
@@ -392,7 +402,7 @@ export default function IncomePage() {
                     <div className="grid md:grid-cols-2 gap-4">
                         <FormField control={transactionForm.control} name="category" render={({ field }) => (
                             <FormItem><FormLabel>Category</FormLabel>
-                                <Select onValueChange={field.onChange} value={field.value}>
+                                <Select onValueChange={(val) => { field.onChange(val); transactionForm.setValue('incomeSourceId', ''); }} value={field.value}>
                                     <FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl>
                                     <SelectContent>
                                         <SelectItem value="Offering">Offering</SelectItem>
@@ -403,17 +413,17 @@ export default function IncomePage() {
                                 </Select>
                             <FormMessage /></FormItem>
                         )}/>
-                        <FormField control={transactionForm.control} name="accountId" render={({ field }) => (
-                            <FormItem><FormLabel>Budget Fund</FormLabel>
+                        <FormField control={transactionForm.control} name="incomeSourceId" render={({ field }) => (
+                            <FormItem><FormLabel>Income Fund Source</FormLabel>
                                 <Select onValueChange={field.onChange} value={field.value}>
-                                    <FormControl><SelectTrigger><SelectValue placeholder="Select fund"/></SelectTrigger></FormControl>
+                                    <FormControl><SelectTrigger><SelectValue placeholder={availableFunds.length > 0 ? "Select fund" : "No funds found"}/></SelectTrigger></FormControl>
                                     <SelectContent>
-                                        {incomeSources?.filter(s => s.category === transactionForm.getValues('category')).map(s => (
-                                            <SelectItem key={s.id} value={s.accountId || ""}>{s.transactionName}</SelectItem>
+                                        {availableFunds.map(s => (
+                                            <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
-                                <FormDescription>Links this payment to a budget source.</FormDescription>
+                                <FormDescription>Select which budgeted fund this belongs to.</FormDescription>
                             <FormMessage /></FormItem>
                         )}/>
                     </div>

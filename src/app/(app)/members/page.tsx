@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useMemo } from 'react';
@@ -30,30 +31,30 @@ import { Textarea } from '@/components/ui/textarea';
 
 const memberConverter = {
     fromFirestore: (snapshot: any): Member => {
-        const data = snapshot.data() as Omit<MemberFirestore, 'id'>;
+        const data = snapshot.data();
         return {
             id: snapshot.id,
             ...data,
             createdAt: (data.createdAt as Timestamp)?.toDate(),
-        };
+        } as Member;
     },
     toFirestore: (member: Member) => member,
 };
 
 const incomeConverter = {
     fromFirestore: (snapshot: any): IncomeRecord => {
-      const data = snapshot.data() as Omit<IncomeRecordFirestore, 'id'>;
+      const data = snapshot.data();
       return {
         id: snapshot.id,
         ...data,
         date: (data.date as Timestamp).toDate(),
-      };
+      } as IncomeRecord;
     }
   };
 
 const incomeSourceConverter = {
     fromFirestore: (snapshot: any): IncomeSource => {
-        const data = snapshot.data() as Omit<IncomeSourceFirestore, 'id'>;
+        const data = snapshot.data();
         return {
             id: snapshot.id,
             ...data,
@@ -78,8 +79,8 @@ export default function MembersPage() {
         defaultValues: { fullName: "" },
     });
 
-    const titheForm = useForm<IncomeFormValues>({
-        resolver: zodResolver(incomeSchema),
+    const titheForm = useForm<IncomeFormValues & { incomeSourceId?: string }>({
+        resolver: zodResolver(incomeSchema.extend({ incomeSourceId: z.string().min(1, "Fund is required") })),
     });
 
     const membersQuery = useMemo(() => authUser ? query(collection(db, 'members'), orderBy('fullName')).withConverter(memberConverter) : null, [authUser]);
@@ -130,10 +131,10 @@ export default function MembersPage() {
         }
     };
 
-    const handleTitheSubmit = async (data: IncomeFormValues) => {
-        if (!authUser || !selectedMemberForTithe) return;
+    const handleTitheSubmit = async (data: IncomeFormValues & { incomeSourceId?: string }) => {
+        if (!authUser || !selectedMemberForTithe || !data.incomeSourceId) return;
         
-        const selectedSource = titheSources?.find(s => s.accountId === data.accountId);
+        const selectedSource = titheSources?.find(s => s.id === data.incomeSourceId);
         if (!selectedSource) {
              toast({ variant: "destructive", title: "Fund Error", description: "Please select a valid income source for tithes." });
              return;
@@ -141,7 +142,8 @@ export default function MembersPage() {
 
         setIsSubmitting(true);
         try {
-            await addIncomeTransaction(data, selectedSource.id, authUser.uid, authUser.email);
+            const finalData = { ...data, accountId: selectedSource.accountId || "" };
+            await addIncomeTransaction(finalData, selectedSource.id, authUser.uid, authUser.email);
             toast({ title: "Success", description: `Tithe recorded for ${selectedMemberForTithe.fullName}.` });
             setIsTitheDialogOpen(false);
             setSelectedMemberForTithe(null);
@@ -168,8 +170,9 @@ export default function MembersPage() {
             amount: 0,
             description: "",
             category: "Tithe",
-            accountId: defaultSource?.accountId || "",
+            accountId: "placeholder",
             memberName: member.fullName,
+            incomeSourceId: defaultSource?.id || "",
         });
         setIsTitheDialogOpen(true);
     };
@@ -330,7 +333,7 @@ export default function MembersPage() {
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Quick Record Tithe: {selectedMemberForTithe?.fullName}</DialogTitle>
-                        <DialogDescription>Enter tithe details. You can select a date from the past.</DialogDescription>
+                        <DialogDescription>Enter tithe details. Ensure you have an Income Source with category "Tithe".</DialogDescription>
                     </DialogHeader>
                     <Form {...titheForm}>
                         <form onSubmit={titheForm.handleSubmit(handleTitheSubmit)} className="space-y-4 py-4">
@@ -344,11 +347,11 @@ export default function MembersPage() {
                                     </Popover>
                                 <FormMessage /></FormItem>
                             )}/>
-                            <FormField control={titheForm.control} name="accountId" render={({ field }) => (
-                                <FormItem><FormLabel>Assign to Income Fund</FormLabel>
+                            <FormField control={titheForm.control} name="incomeSourceId" render={({ field }) => (
+                                <FormItem><FormLabel>Income Fund Source</FormLabel>
                                     <Select onValueChange={field.onChange} value={field.value || ""}>
-                                        <FormControl><SelectTrigger><SelectValue placeholder="Select accounting fund" /></SelectTrigger></FormControl>
-                                        <SelectContent>{titheSources?.map(s => <SelectItem key={s.id} value={s.accountId || ''}>{s.transactionName}</SelectItem>)}</SelectContent>
+                                        <FormControl><SelectTrigger><SelectValue placeholder={titheSources && titheSources.length > 0 ? "Select budget category" : "No tithe funds found"}/></SelectTrigger></FormControl>
+                                        <SelectContent>{titheSources?.map(s => <SelectItem key={s.id} value={s.id}>{s.transactionName}</SelectItem>)}</SelectContent>
                                     </Select>
                                     <FormDescription className="flex items-center gap-1">
                                         <Info className="h-3 w-3" /> Connects this tithe to your general church budget categories.
