@@ -1,13 +1,13 @@
 
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useDocumentData, useCollectionData } from 'react-firebase-hooks/firestore';
 import { doc, collection, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore } from '@/types';
-import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins } from 'lucide-react';
+import type { Member, IncomeRecord, MemberFirestore, IncomeRecordFirestore, IncomeFormValues } from '@/types';
+import { Loader2, AlertTriangle, ArrowLeft, DollarSign, HandCoins, Edit, Trash2, CalendarIcon, PlusCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -15,6 +15,18 @@ import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '@/lib/firebase';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { incomeSchema } from '@/types';
+import { useToast } from "@/hooks/use-toast";
+import { updateIncomeTransaction, deleteIncomeTransaction } from '@/services/incomeTransactionService';
 
 const memberConverter = {
     fromFirestore: (snapshot: any): Member => {
@@ -23,7 +35,7 @@ const memberConverter = {
             id: snapshot.id,
             ...data,
             createdAt: (data.createdAt as Timestamp)?.toDate(),
-        };
+        } as Member;
     },
     toFirestore: (member: Member) => member,
 };
@@ -42,9 +54,12 @@ const incomeConverter = {
 export default function MemberTitheDetailsPage() {
     const router = useRouter();
     const params = useParams();
+    const { toast } = useToast();
     const memberId = params.memberId as string;
     
     const [authUser, authLoading, authError] = useAuthState(auth);
+    const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [editingTransaction, setEditingTransaction] = useState<IncomeRecord | null>(null);
 
     const memberRef = useMemo(() => memberId ? doc(db, 'members', memberId).withConverter(memberConverter) : null, [memberId]);
     const [member, loadingMember, errorMember] = useDocumentData(memberRef);
@@ -60,12 +75,63 @@ export default function MemberTitheDetailsPage() {
     
     const [titheRecords, loadingTithes, errorTithes] = useCollectionData(titheQuery);
 
+    const form = useForm<IncomeFormValues>({
+        resolver: zodResolver(incomeSchema),
+        defaultValues: {
+            code: "",
+            transactionName: "",
+            date: new Date(),
+            amount: 0,
+            description: "",
+            category: "Tithe",
+            accountId: "",
+            memberName: member?.fullName || "",
+        },
+    });
+
     const totalTithes = useMemo(() => {
         return titheRecords?.reduce((sum, record) => sum + record.amount, 0) || 0;
     }, [titheRecords]);
 
+    const handleUpdate = async (data: IncomeFormValues) => {
+        if (!authUser || !editingTransaction) return;
+        try {
+            await updateIncomeTransaction(editingTransaction.id, data, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Tithe record updated." });
+            setIsEditDialogOpen(false);
+            setEditingTransaction(null);
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to update record." });
+        }
+    };
+
+    const handleDelete = async (transactionId: string) => {
+        if (!authUser) return;
+        try {
+            await deleteIncomeTransaction(transactionId, authUser.uid, authUser.email);
+            toast({ title: "Success", description: "Tithe record deleted." });
+        } catch (error: any) {
+            toast({ variant: "destructive", title: "Error", description: error.message || "Failed to delete record." });
+        }
+    };
+
+    const openEditDialog = (transaction: IncomeRecord) => {
+        setEditingTransaction(transaction);
+        form.reset({
+            code: transaction.code,
+            transactionName: transaction.transactionName,
+            date: transaction.date,
+            amount: transaction.amount,
+            description: transaction.description || "",
+            category: "Tithe",
+            accountId: transaction.accountId || "",
+            memberName: transaction.memberName || member?.fullName || "",
+        });
+        setIsEditDialogOpen(true);
+    };
+
     const formatCurrency = (value: number) => {
-        return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} XAF`;
+        return `${value.toLocaleString('fr-CM', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} XAF`;
     };
 
     const isLoading = loadingMember || loadingTithes || authLoading;
@@ -95,7 +161,7 @@ export default function MemberTitheDetailsPage() {
                         <HandCoins className="h-8 w-8 text-primary" />
                         <span>Tithe History for {member.fullName}</span>
                     </CardTitle>
-                    <CardDescription>A complete record of all tithes paid by this member.</CardDescription>
+                    <CardDescription>View, edit, or delete all tithes recorded for this member.</CardDescription>
                 </CardHeader>
                 <CardContent>
                      <div className="flex items-center space-x-4 rounded-md border p-4 bg-muted/50">
@@ -111,7 +177,7 @@ export default function MemberTitheDetailsPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Tithe Records</CardTitle>
-                    <CardDescription>All individual tithe payments are listed below.</CardDescription>
+                    <CardDescription>List of individual tithe payments.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     {loadingTithes ? (
@@ -121,10 +187,11 @@ export default function MemberTitheDetailsPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Transaction Code</TableHead>
+                                        <TableHead>Code</TableHead>
                                         <TableHead>Date</TableHead>
                                         <TableHead className="text-right">Amount</TableHead>
                                         <TableHead>Description</TableHead>
+                                        <TableHead className="text-right">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -132,8 +199,28 @@ export default function MemberTitheDetailsPage() {
                                         <TableRow key={record.id}>
                                             <TableCell>{record.code}</TableCell>
                                             <TableCell>{format(record.date, "PP")}</TableCell>
-                                            <TableCell className="text-right">{formatCurrency(record.amount)}</TableCell>
-                                            <TableCell className="max-w-[300px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(record.amount)}</TableCell>
+                                            <TableCell className="max-w-[200px] truncate" title={record.description}>{record.description || 'N/A'}</TableCell>
+                                            <TableCell className="text-right space-x-1">
+                                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(record)} aria-label="Edit Tithe"><Edit className="h-4 w-4" /></Button>
+                                                <AlertDialog>
+                                                    <AlertDialogTrigger asChild>
+                                                        <Button variant="ghost" size="icon" aria-label="Delete Tithe"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                                    </AlertDialogTrigger>
+                                                    <AlertDialogContent>
+                                                        <AlertDialogHeader>
+                                                            <AlertDialogTitle>Delete Tithe Record?</AlertDialogTitle>
+                                                            <AlertDialogDescription>
+                                                                Are you sure you want to delete this tithe record of {formatCurrency(record.amount)}? This action cannot be undone.
+                                                            </AlertDialogDescription>
+                                                        </AlertDialogHeader>
+                                                        <AlertDialogFooter>
+                                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                            <AlertDialogAction onClick={() => handleDelete(record.id)}>Delete</AlertDialogAction>
+                                                        </AlertDialogFooter>
+                                                    </AlertDialogContent>
+                                                </AlertDialog>
+                                            </TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -144,6 +231,45 @@ export default function MemberTitheDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <Dialog open={isEditDialogOpen} onOpenChange={(open) => { setIsEditDialogOpen(open); if (!open) setEditingTransaction(null); }}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Edit Tithe Record</DialogTitle>
+                        <DialogDescription>Update the details for this member's tithe payment.</DialogDescription>
+                    </DialogHeader>
+                    <Form {...form}>
+                        <form onSubmit={form.handleSubmit(handleUpdate)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-4">
+                            <FormField control={form.control} name="date" render={({ field }) => (
+                                <FormItem className="flex flex-col"><FormLabel>Date</FormLabel>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                            <FormControl><Button variant={"outline"} className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`} >{field.value ? format(field.value, "PPP") : <span>Pick a date</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0" align="start"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
+                                    </Popover>
+                                <FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="code" render={({ field }) => (
+                                <FormItem><FormLabel>Transaction Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="amount" render={({ field }) => (
+                                <FormItem><FormLabel>Amount (XAF)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <FormField control={form.control} name="description" render={({ field }) => (
+                                <FormItem><FormLabel>Description</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
+                            )}/>
+                            <DialogFooter>
+                                <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                                <Button type="submit" disabled={form.formState.isSubmitting}>
+                                    {form.formState.isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                                    Save Changes
+                                </Button>
+                            </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
